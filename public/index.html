@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>냥냥 오피스</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri@2.40.3/dist/galmuri.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="directory">
+    <h1>🐾 냥냥 빌딩</h1>
+    <p class="sub">층별 안내 · FLOOR GUIDE</p>
+    <ol id="floors"></ol>
+    <button id="follow" class="on">✨ 최근 세션 자동 따라가기</button>
+    <p class="hint">층을 누르면 그 프로젝트의 최신 세션으로, 매장(세션)을 누르면 그 세션에 고정돼요. <code>/clear</code> 하면 같은 층 새 세션으로 알아서 따라가요.</p>
+  </aside>
+
+  <main>
+    <header>
+      <div id="lift"><span id="lift-arrow">▲</span><b id="lift-floor">--</b></div>
+      <div class="where">
+        <div id="floor-name">-</div>
+        <div id="session-title"></div>
+      </div>
+      <div id="conn" class="off">● 연결 중</div>
+    </header>
+    <div id="stage">
+      <div id="world-wrap">
+        <canvas id="world"></canvas>
+        <div id="overlay"></div>
+      </div>
+      <div id="notice" hidden></div>
+    </div>
+  </main>
+
+  <aside id="log">
+    <h2>📒 업무 일지</h2>
+    <ol id="log-list"></ol>
+  </aside>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

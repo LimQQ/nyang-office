@@ -1,0 +1,303 @@
+:root {
+  --bg: #1b1d25;
+  --panel: #242733;
+  --panel-2: #2d3140;
+  --line: #3a3f50;
+  --ink: #eef0f4;
+  --muted: #9aa1b2;
+  --accent: #d97757;
+  --green: #5ef08a;
+  --amber: #ffb347;
+  --red: #e05a4f;
+  --s: 2;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font: 12px/1.5 'Galmuri11', 'Malgun Gothic', 'Apple SD Gothic Neo', monospace;
+}
+
+body {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 270px;
+  height: 100vh;
+  overflow: hidden;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; }
+code { font-family: 'GalmuriMono11', monospace; background: var(--panel-2); padding: 0 4px; border-radius: 3px; }
+a { color: var(--amber); }
+
+/* ── 층별 안내 ── */
+#directory {
+  background: var(--panel);
+  border-right: 2px solid var(--line);
+  padding: 16px 14px;
+  overflow: hidden auto;
+}
+#directory h1 { font: 18px 'Galmuri14', 'Galmuri11', sans-serif; margin: 0; letter-spacing: 1px; }
+.sub { margin: 2px 0 14px; color: var(--muted); font-size: 11px; letter-spacing: 2px; }
+#floors { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.floor .fl {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 38px 1fr 10px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  background: var(--panel-2);
+  border: 2px solid transparent;
+  border-radius: 4px;
+  text-align: left;
+}
+.floor .fl:hover { border-color: var(--line); }
+.floor.here .fl { border-color: var(--accent); background: #3a2f2c; }
+.floor .no { font: 14px 'GalmuriMono11', monospace; color: var(--amber); }
+.floor .nm { min-width: 0; display: grid; }
+.floor .nm b, .floor .nm small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: normal; }
+.floor .nm small { font-size: 10px; color: var(--muted); }
+.floor .nm small:empty { display: none; }
+.floor .lamp { width: 8px; height: 8px; border-radius: 2px; background: #444a5a; }
+.floor.live .lamp { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.floor.dark .fl { opacity: .45; }
+.floor.dark .nm b::after { content: ' · 불 꺼짐'; color: var(--muted); font-size: 10px; }
+.floor { min-width: 0; }
+.shops { list-style: none; margin: 4px 0 6px 18px; min-width: 0; padding: 0 0 0 10px; border-left: 2px dashed var(--line); display: grid; gap: 2px; }
+.shops button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 6px;
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  text-align: left;
+  color: var(--muted);
+}
+.shops button:hover { background: var(--panel-2); color: var(--ink); }
+.shops .on button { color: var(--ink); background: var(--panel-2); }
+.shops .on button::before { content: '▸ '; color: var(--accent); }
+.shops .t { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.shops .ago { flex: none; font-size: 10px; opacity: .7; }
+#follow {
+  margin-top: 12px;
+  width: 100%;
+  padding: 7px;
+  background: var(--panel-2);
+  border: 2px solid var(--line);
+  border-radius: 4px;
+}
+#follow.on { border-color: var(--green); color: var(--green); }
+.hint { color: var(--muted); font-size: 11px; margin-top: 12px; }
+
+/* ── 가운데: 엘리베이터 표시등 + 사무실 ── */
+main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  border-bottom: 2px solid var(--line);
+  background: var(--panel);
+}
+#lift {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: #0f1115;
+  border: 2px solid #3b3f48;
+  border-radius: 4px;
+  color: var(--amber);
+  font: 20px 'GalmuriMono11', monospace;
+  text-shadow: 0 0 6px rgba(255, 179, 71, .6);
+}
+#lift-arrow { font-size: 14px; }
+#lift.ride #lift-arrow { animation: blink .3s steps(2) 5; }
+.where { flex: 1; min-width: 0; }
+#floor-name { font: 15px 'Galmuri14', 'Galmuri11', sans-serif; }
+#session-title { color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#conn { font-size: 11px; color: var(--muted); white-space: nowrap; }
+#conn.live { color: var(--green); }
+#conn.demo { color: var(--amber); }
+#conn.off { color: var(--red); }
+
+#stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 40%, #2a2e3b, #15171d 70%);
+}
+#world-wrap { position: relative; box-shadow: 0 0 0 4px #0f1115, 0 12px 40px rgba(0, 0, 0, .5); }
+#world-wrap.ride { animation: ride .9s ease-in-out; }
+#world { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+#overlay { position: absolute; inset: 0; pointer-events: none; }
+#notice {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  max-width: min(520px, 90%);
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 2px solid var(--amber);
+  border-radius: 6px;
+  text-align: center;
+}
+
+@keyframes ride {
+  0% { filter: none; }
+  35% { filter: brightness(.15); transform: translateY(6px); }
+  65% { filter: brightness(.15); transform: translateY(-6px); }
+  100% { filter: none; transform: none; }
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ── 사무실 위 글자 ── */
+.room-label {
+  position: absolute;
+  padding: 0 4px;
+  font: 10px/14px 'Galmuri9', 'Galmuri11', sans-serif;
+  color: #3a2a22;
+  background: rgba(255, 255, 255, .6);
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.lift-display {
+  position: absolute;
+  width: calc(var(--s) * 20px);
+  height: calc(var(--s) * 7px);
+  font: calc(var(--s) * 5px) / calc(var(--s) * 7px) 'GalmuriMono7', monospace;
+  text-align: center;
+  color: var(--amber);
+  text-shadow: 0 0 4px rgba(255, 179, 71, .8);
+}
+.ev-sign {
+  position: absolute;
+  width: calc(var(--s) * 28px);
+  height: calc(var(--s) * 12px);
+  font: calc(var(--s) * 7px) / calc(var(--s) * 12px) 'Galmuri11', sans-serif;
+  text-align: center;
+  color: #e8ecf0;
+}
+.board {
+  position: absolute;
+  width: calc(var(--s) * 72px);
+  height: calc(var(--s) * 21px);
+  margin: 0;
+  padding: calc(var(--s) * 1px) calc(var(--s) * 2px);
+  list-style: none;
+  overflow: hidden;
+  font: calc(var(--s) * 4.5px) / calc(var(--s) * 5px) 'Galmuri7', 'Galmuri9', sans-serif;
+  color: #2a3a5a;
+}
+.board li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.board li::before { content: '☐ '; }
+.board li.completed { color: #8a94a3; text-decoration: line-through; }
+.board li.completed::before { content: '☑ '; color: #3f8f45; }
+.board li.in_progress { color: #c0504d; }
+.board li.in_progress::before { content: '▶ '; }
+
+/* ── 고양이 머리 위 말풍선 · 이름표 ── */
+.cat-ui { position: absolute; left: 0; top: 0; width: 0; height: 0; will-change: transform; }
+.cat-ui .tag {
+  position: absolute;
+  top: calc(var(--s) * 16px);
+  left: 0;
+  transform: translateX(-50%);
+  padding: 0 5px;
+  font: 10px/14px 'Galmuri9', 'Galmuri11', sans-serif;
+  color: #fff;
+  background: rgba(20, 22, 30, .7);
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.cat-ui .tag::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-radius: 1px;
+  background: var(--dot);
+}
+.bubble {
+  position: absolute;
+  bottom: 2px;
+  left: 0;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 230px;
+  padding: 3px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #2a2320;
+  background: #fff;
+  border: 2px solid #2a2320;
+  border-radius: 4px;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, .25);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  animation: pop .18s ease-out;
+}
+.bubble.hidden { display: none; }
+.bubble.label {
+  font-size: 11px;
+  color: #fff;
+  background: rgba(30, 33, 44, .85);
+  border-color: rgba(255, 255, 255, .15);
+  -webkit-line-clamp: 1;
+  animation: none;
+}
+.bubble.thought {
+  color: #4a4f66;
+  background: #f1f3ff;
+  border-color: #8f96b8;
+  border-style: dashed;
+  border-radius: 14px;
+}
+.bubble.thought::before { content: '💭 '; }
+.bubble.error { color: #fff; background: var(--red); border-color: #6e1a14; }
+.bubble.zzz {
+  padding: 0;
+  font-weight: bold;
+  color: #fff;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  text-shadow: 1px 1px 0 #3a2a22;
+  animation: drift 2.4s ease-in-out infinite;
+}
+@keyframes pop { from { transform: translateX(-50%) scale(.6); opacity: 0; } }
+@keyframes drift { 50% { transform: translateX(-30%) translateY(-4px); opacity: .6; } }
+
+/* ── 업무 일지 ── */
+#log { background: var(--panel); border-left: 2px solid var(--line); padding: 16px 14px; overflow: auto; }
+#log h2 { font: 15px 'Galmuri14', 'Galmuri11', sans-serif; margin: 0 0 10px; }
+#log-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+#log-list li { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; padding: 6px 8px; background: var(--panel-2); border-radius: 4px; }
+#log-list li.err { background: #4a2724; }
+#log-list li.think { color: #c5c9e6; }
+#log-list li.agent { background: #2c3a33; }
+#log-list time { grid-row: span 2; font: 10px 'GalmuriMono9', monospace; color: var(--muted); }
+#log-list b { font-weight: normal; font-size: 11px; color: var(--muted); }
+#log-list b::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 4px; background: var(--dot); border-radius: 1px; }
+#log-list span { overflow-wrap: anywhere; }
+
+@media (max-width: 1000px) {
+  body { grid-template-columns: 1fr; grid-template-rows: auto minmax(360px, 1fr) 220px; height: auto; min-height: 100vh; overflow: auto; }
+  #directory { border-right: 0; border-bottom: 2px solid var(--line); max-height: 240px; }
+  #log { border-left: 0; border-top: 2px solid var(--line); }
+}

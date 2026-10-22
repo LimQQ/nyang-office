@@ -1,0 +1,6 @@
+office.log
+server.log
+node_modules/
+.claude/
+.DS_Store
+Thumbs.db

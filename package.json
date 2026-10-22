@@ -1,0 +1,12 @@
+{
+  "name": "nyang-office",
+  "version": "1.0.0",
+  "description": "Claude Code 작업을 도트 고양이 사무실로 보여 주는 로컬 대시보드",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
