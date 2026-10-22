@@ -10,12 +10,18 @@ const IDLE_AFTER = 12 * 1000;      // 아무 소식이 이만큼 없으면 Claud
 const STUCK_AFTER = 5 * 60 * 1000; // 결과가 영영 안 오는 일은 이만큼 지나면 잊는다
 const MIN_WORK = 900;              // 담당 고양이는 일을 받으면 적어도 이만큼은 일하는 모습을 보인다
 const REST_AFTER = 1500;           // 일이 끝나고 이만큼 지나면 고개를 돌려 앞을 본다
-const DOZE_AFTER = 60 * 1000;      // 이만큼 한가하면 자리에서 존다
+const DOZE_AFTER = 60 * 1000;      // 이만큼 한가하면 자리로 돌아가 존다
+const ROAM_SPEED = 26;             // 쉬는 고양이는 느긋하게 걷는다
+const MEET_LEN = 7000;             // 회의 길이
+const MEET_COOLDOWN = 40 * 1000;   // 회의가 너무 자주 열리지 않도록(긴급 회의는 예외)
+const TEA_EVERY = [90 * 1000, 150 * 1000]; // 한가할 때 가끔 티타임
 const DEMO = new URLSearchParams(location.search).has('demo');
 const $ = s => document.querySelector(s);
 // 모든 예약·말풍선·걷기는 이 시뮬레이션 시계를 따른다. 탭이 가려져 프레임이 멈추면 사무실 시간도 같이 멈춘다.
 let simMs = 0;
 const now = () => simMs;
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const rand = (a, b) => a + Math.random() * (b - a);
 
 const canvas = $('#world');
 const g = canvas.getContext('2d');
@@ -42,7 +48,7 @@ export function roomForTool(name = '') {
   if (/^(WebFetch|WebSearch)$/.test(name) || name.startsWith('mcp__')) return 'web';
   return 'dev';
 }
-const POSE = { library: 'read', dev: 'type', server: 'rack', web: 'type', meeting: 'write', home: 'sit', nap: 'sleep', seat: 'sit' };
+const POSE = { library: 'read', dev: 'type', server: 'rack', web: 'type', meeting: 'write', home: 'sit', nap: 'sleep', seat: 'sit', meet: 'sit' };
 // 담당 고양이가 일을 받을 때 하는 대답
 const ACK = {
   library: ['찾아볼게냥', '넵! 📚', '서가 뒤지는 중'],
@@ -128,7 +134,7 @@ class Cat {
     this.arrive();
   }
 
-  goTo(spot, then) {
+  goTo(spot, then, { slow = false } = {}) {
     this.target = spot;
     this.then = then || null;
     const sx = Math.round(this.x / TILE), sy = Math.round(this.y / TILE);
@@ -137,7 +143,7 @@ class Cat {
     this.oy = 0;
     let len = 0, px = this.x, py = this.y;
     for (const [x, y] of this.path) { len += Math.hypot(x - px, y - py); px = x; py = y; }
-    this.speed = Math.max(SPEED, len / TRIP_SEC);
+    this.speed = slow ? ROAM_SPEED : Math.max(SPEED, len / TRIP_SEC);
   }
 
   arrive() {
@@ -221,6 +227,14 @@ function wake(c) {
 
 // ───────────────────────── 담당 고양이 상태 ─────────────────────────
 
+// state: work 일하는 중 · ready 자리에서 쉼 · roam 돌아다님 · homing 자리로 돌아가는 중
+//        going 일하러 뛰어가는 중 · meeting 회의 중 · doze 자리에서 졺
+const CHAT = ['냥?', '오늘 뭐 해냥', '츄르 먹을래?', '간식 있어?', '고생했어냥', '창밖에 새 봤어?'];
+const REPLY = ['냥!', '좋아냥!', '나중에~', '😺', '냐옹', '나도 봤어!'];
+const YAWN = ['하암~', '기지개 쭈욱~', '졸리다냥', '🐟 생각 중'];
+
+const atDesk = r => !r.path.length && Math.abs(r.x - r.desk.x * TILE) < 1 && Math.abs(r.y - r.desk.y * TILE) < 1;
+
 function residentWork(r, label) {
   if (r.state === 'doze') r.say('speech', '냐…? 💤 넵!', 1200);
   r.state = 'work';
@@ -231,22 +245,96 @@ function residentWork(r, label) {
 
 function residentReset(r) {
   r.jobs.clear();
+  release(r);
   r.place(r.desk);
   r.state = 'ready';
   r.restAt = now();
+  r.nextIdleAt = now() + rand(4000, 10000);
   r.label = '';
   r.bubble = null;
   r.face = 'down';
   r.pose = 'sit';
 }
 
-// 일이 없으면 고개를 돌려 앞을 보고, 오래 한가하면 존다
+const settle = r => () => { r.state = 'ready'; r.face = 'down'; r.pose = 'sit'; r.nextIdleAt = now() + rand(4000, 9000); };
+
+function goDesk(r, then, slow = false) {
+  release(r);
+  r.goTo(r.desk, then, { slow });
+}
+
+function randomTile(room, cat) {
+  for (let k = 0; k < 40; k++) {
+    const x = room.x0 + Math.floor(Math.random() * (room.x1 - room.x0 + 1));
+    const y = room.y0 + Math.floor(Math.random() * (room.y1 - room.y0 + 1));
+    if (O.walkable(x, y) && !occupied(x, y, cat)) return [x, y];
+  }
+  return null;
+}
+
+function roamTo(r, tile) {
+  if (!tile) return;
+  release(r);
+  r.state = 'roam';
+  r.goTo({ x: tile[0], y: tile[1], face: 'down', pose: 'stand' }, null, { slow: true });
+}
+
+// 한가한 친구 옆으로 가서 수다 한 마디
+function visitFriend(r) {
+  const friends = residentList.filter(o => o !== r && !o.jobs.size && (o.state === 'ready' || o.state === 'roam') && !o.path.length);
+  if (!friends.length) return roamTo(r, randomTile(O.ROOMS.hall, r));
+  const f = pick(friends);
+  const [x, y] = O.nearestFree(Math.round(f.x / TILE), Math.round(f.y / TILE), (x, y) => !occupied(x, y, r));
+  release(r);
+  r.state = 'roam';
+  r.goTo({ x, y, face: faceTo(x, y, f), pose: 'stand' }, () => {
+    if (r.jobs.size || r.state !== 'roam') return;
+    r.say('speech', pick(CHAT), 1600);
+    after(900, () => {
+      if (f.jobs.size || f.state === 'doze' || f.state === 'meeting' || f.path.length) return;
+      f.face = faceTo(f.x / TILE, f.y / TILE, r);
+      f.say('speech', pick(REPLY), 1500);
+    });
+  }, { slow: true });
+}
+
+function idleAction(r) {
+  r.nextIdleAt = now() + rand(5000, 11000);
+  const roll = Math.random();
+  if (roll < 0.3) roamTo(r, randomTile(O.ROOMS[r.homeRoom], r));
+  else if (roll < 0.45) roamTo(r, randomTile(O.ROOMS.hall, r));
+  else if (roll < 0.6) visitFriend(r);
+  else if (roll < 0.72) { r.pose = 'groom'; r.face = 'down'; }
+  else if (roll < 0.82) r.say('speech', pick(YAWN), 1400);
+  else { r.state = 'homing'; goDesk(r, settle(r), true); }
+}
+
+// 일이 없으면 앞을 보고 쉬다가 돌아다니고, 오래 한가하면 자리로 돌아가 존다
 function tickResidents() {
   const t = now();
   for (const r of residentList) {
-    if (r.jobs.size) continue;
-    if (r.state === 'work' && t - r.restAt > REST_AFTER) { r.state = 'ready'; r.label = ''; r.face = 'down'; r.pose = 'sit'; }
-    if (r.state === 'ready' && t - r.restAt > DOZE_AFTER) { r.state = 'doze'; r.pose = 'sleep'; }
+    if (r.jobs.size || r.state === 'going' || r.state === 'meeting') continue;
+    if (r.state === 'work') {
+      if (t - r.restAt > REST_AFTER) { settle(r)(); r.label = ''; r.nextIdleAt = t + rand(3000, 8000); }
+      continue;
+    }
+    if (r.path.length || r.state === 'doze') continue;
+    if (t - r.restAt > DOZE_AFTER) {
+      if (atDesk(r)) { r.state = 'doze'; r.pose = 'sleep'; r.face = 'down'; }
+      else if (r.state !== 'homing') { r.state = 'homing'; goDesk(r, settle(r), true); }
+      continue;
+    }
+    if (t >= r.nextIdleAt) idleAction(r);
+  }
+}
+
+// 서브에이전트는 자리에서 가끔 두리번거린다
+function tickAgents() {
+  const t = now();
+  for (const c of agents.values()) {
+    if (c.phase !== 'work' || c.path.length || !c.target || t < (c.nextLook || 0)) continue;
+    c.nextLook = t + rand(3000, 7000);
+    c.face = c.face === c.target.face ? pick(['down', 'left', 'right']) : c.target.face;
   }
 }
 
@@ -256,10 +344,11 @@ const letters = [];
 
 const headOf = c => [c.x + 8, c.y + (c.path.length ? 0 : c.oy) + 3];
 
+// 받는 고양이가 걷고 있어도 편지가 따라간다(도착 지점은 매 프레임 다시 계산)
 function sendLetter(from, to, err, onLand) {
   const a = headOf(from), b = headOf(to);
   const dist = Math.hypot(b[0] - a[0], b[1] - a[1]);
-  letters.push({ a, b, dist, t0: now(), dur: Math.min(1300, Math.max(600, dist * 4.5)), err, onLand });
+  letters.push({ a, to, dist, t0: now(), dur: Math.min(1300, Math.max(600, dist * 4.5)), err, onLand });
 }
 
 function tickLetters() {
@@ -274,10 +363,11 @@ function tickLetters() {
 function drawLetters() {
   for (const l of letters) {
     const p = Math.min(1, (now() - l.t0) / l.dur);
+    const b = headOf(l.to);
     const at = q => {
       const e = q < 0.5 ? 2 * q * q : 1 - (-2 * q + 2) ** 2 / 2;
       const arc = Math.min(44, l.dist * 0.35) * 4 * e * (1 - e);
-      return [l.a[0] + (l.b[0] - l.a[0]) * e, l.a[1] + (l.b[1] - l.a[1]) * e - arc];
+      return [l.a[0] + (b[0] - l.a[0]) * e, l.a[1] + (b[1] - l.a[1]) * e - arc];
     };
     for (const k of [0.12, 0.06]) { // 꼬리 점선
       if (p - k <= 0) continue;
@@ -323,15 +413,31 @@ function delegate(from, ev) {
 function land(job) {
   if (job.done) return;
   job.landed = true;
-  job.startedAt = now();
   const w = job.worker;
   w.jobs.add(job);
   if (w === human) {
     w.label = job.label;
-  } else {
+    return startJob(job);
+  }
+  if (meeting) meeting.people.delete(w);
+  if (atDesk(w) && w.state !== 'going') {
     if (w.jobs.size === 1) w.say('speech', ACK[w.homeRoom][ackTurn++ % 3], 1000);
     residentWork(w, job.label);
+    return startJob(job);
   }
+  // 산책·수다·회의 중에 일을 받으면 책상으로 뛰어가서, 도착한 순간부터 일한다
+  w.label = job.label;
+  if (w.state === 'going') return;
+  w.state = 'going';
+  w.say('speech', pick(['바로 갈게냥! 💨', '앗 일이다!', '가요 가요!']), 1200);
+  goDesk(w, () => {
+    residentWork(w, w.label);
+    for (const j of w.jobs) if (!j.startedAt) startJob(j);
+  });
+}
+
+function startJob(job) {
+  job.startedAt = now();
   maybeFinish(job);
 }
 
@@ -341,10 +447,24 @@ function onResult(ev) {
   job.from.lastAt = now();
   job.result = { err: !!ev.err, text: ev.text || '' };
   maybeFinish(job);
+  // 30초 안에 두 번 실패하면 긴급 회의
+  if (ev.err) {
+    errTimes = errTimes.filter(t => now() - t < 30 * 1000).concat(now());
+    if (errTimes.length >= 2) { errTimes = []; callMeeting('urgent'); }
+  }
+}
+
+// 할 일 목록이 새로 짜이면(첫 항목이나 개수가 바뀌면) 계획 회의
+let lastTodos = [];
+function onTodos(items) {
+  const fresh = !lastTodos.length || items.length !== lastTodos.length || (items[0] && items[0].t) !== (lastTodos[0] && lastTodos[0].t);
+  lastTodos = items;
+  setTodos(items);
+  if (fresh && items.some(x => x.s !== 'completed')) callMeeting('plan');
 }
 
 function maybeFinish(job) {
-  if (job.done || !job.landed || !job.result || job.waiting) return;
+  if (job.done || !job.startedAt || !job.result || job.waiting) return;
   const wait = job.startedAt + MIN_WORK - now();
   if (wait > 0) { job.waiting = true; after(wait, () => { job.waiting = false; maybeFinish(job); }); return; }
   finish(job, true);
@@ -377,6 +497,84 @@ function dropJobsOf(c) {
   for (const j of [...jobs.values()]) if (j.from === c) finish(j, false);
 }
 
+// ───────────────────────── 회의 ─────────────────────────
+
+const MEETINGS = {
+  kickoff: { title: '📢 킥오프 회의!', boss: true, talk: ['좋아요!', '어디부터 볼까요?', '맡겨줘냥', '일정은요?', '👍', '바로 시작!'] },
+  plan:    { title: '🗒️ 계획 회의!', boss: true, talk: ['순서 좋네요', '🤔', '이건 제가 할게요', '찬성!', '화이트보드 봐주세요', '냥냥'] },
+  urgent:  { title: '🚨 긴급 회의!', boss: true, talk: ['원인이 뭘까요?', '로그 봤어요?', '💦', '다시 해봐요!', '침착하게냥', '🤔'] },
+  tea:     { title: '🍵 티타임!', boss: false, talk: ['츄르 맛있다', '날씨 좋다냥', '하암~', '🐟', '그루밍 좀 할게', '냥냥'] },
+};
+let meeting = null; // { kind, until, people:Set, nextChat }
+let lastMeetingEnd = -Infinity; // 마지막 "일" 회의가 끝난 시각(티타임은 세지 않는다)
+let nextTea = 0;
+let errTimes = [];
+
+// 회의를 열 수 있으면 true. 일하는 고양이는 빠지고, 쉬는 고양이만 회의실 테이블로 모인다.
+function callMeeting(kind) {
+  const t = now();
+  const spec = MEETINGS[kind];
+  if (meeting) {
+    if (meeting.kind !== 'tea' || kind === 'tea') { meeting.until = Math.max(meeting.until, t + 3000); return true; }
+    endMeeting();
+  }
+  if (kind !== 'urgent' && t - lastMeetingEnd < MEET_COOLDOWN) return false;
+  const people = [];
+  if (spec.boss && claude) people.push(claude);
+  for (const r of residentList) if (!r.jobs.size && r.state !== 'going') people.push(r);
+  if (people.length < (spec.boss ? 2 : 3)) return false;
+  meeting = { kind, until: t + (kind === 'tea' ? 9000 : MEET_LEN), people: new Set(people), nextChat: t + 2200 };
+  const host = spec.boss ? claude : pick(people);
+  host.say('speech', spec.title, 1800);
+  log(host, spec.title, 'meet');
+  for (const p of people) joinMeeting(p);
+  return true;
+}
+
+function joinMeeting(p) {
+  if (p === claude) {
+    wake(p);
+    sendTo(p, 'meet', () => { p.face = 'down'; p.pose = 'sit'; });
+    return;
+  }
+  if (p.state === 'doze') p.say('speech', '냐? 회의?', 1000);
+  p.state = 'meeting';
+  if (p === residents.meeting) { goDesk(p, () => { p.face = 'down'; p.pose = 'sit'; }); return; } // 기획냥은 화이트보드 앞에서 발표
+  const seat = takeSpot('meet', p);
+  p.goTo(seat, () => { p.face = seat.face; p.pose = 'sit'; });
+}
+
+function endMeeting() {
+  const m = meeting;
+  meeting = null;
+  if (m.kind !== 'tea') lastMeetingEnd = now();
+  for (const p of m.people) {
+    if (p === claude) {
+      if (claude.room === 'meet') { claude.say('speech', '자, 각자 자리로! 🐾', 1500); sendTo(claude, 'home'); }
+      continue;
+    }
+    if (p.state !== 'meeting') continue; // 이미 일하러 갔다
+    p.state = 'homing';
+    goDesk(p, settle(p), true);
+  }
+}
+
+function tickMeeting() {
+  const t = now();
+  if (!meeting) {
+    if (t >= nextTea) {
+      nextTea = t + rand(...TEA_EVERY);
+      if (!jobs.size) callMeeting('tea');
+    }
+    return;
+  }
+  if (t >= meeting.until) return endMeeting();
+  if (t < meeting.nextChat) return;
+  meeting.nextChat = t + rand(1100, 1900);
+  const talkers = [...meeting.people].filter(p => !p.path.length && !(p.jobs && p.jobs.size));
+  if (talkers.length) pick(talkers).say('speech', pick(MEETINGS[meeting.kind].talk), 1300);
+}
+
 // ───────────────────────── 엘리베이터 ─────────────────────────
 
 const lift = { open: 0, until: 0, side: 0 };
@@ -390,20 +588,21 @@ function updateLift(dt) {
 
 function handle(ev) {
   if (ev.k === 'spawn') return void spawnAgent(ev);
-  if (ev.k === 'todos') return setTodos(ev.items);
+  if (ev.k === 'todos') return onTodos(ev.items);
   if (ev.k === 'result') return onResult(ev);
   const c = catOf(ev.a);
   if (!c) return;
   c.lastAt = now();
+  const inMeeting = !!meeting && meeting.people.has(c);
   switch (ev.k) {
     case 'tool':
       wake(c);
       if (c.phase === 'report' || c.phase === 'leave') backToWork(c);
-      if (c === claude && c.room !== 'home') sendTo(c, 'home');
+      if (c === claude && c.room !== 'home' && !inMeeting) sendTo(c, 'home');
       return delegate(c, ev);
     case 'think':
       wake(c);
-      if (c === claude && c.room !== 'home') sendTo(c, 'home');
+      if (c === claude && c.room !== 'home' && !inMeeting) sendTo(c, 'home');
       c.chinUntil = now() + 3500;
       c.say('thought', ev.text || '음…', 3500);
       if (ev.text) log(c, '💭 ' + ev.text, 'think');
@@ -425,7 +624,8 @@ function handle(ev) {
       wake(c);
       c.phase = 'work';
       c.say('speech', '냥! 🐾', 1500);
-      sendTo(c, 'home');
+      // 새 요청이 오면 한가한 고양이들을 모아 킥오프 회의부터
+      if (c !== claude || !callMeeting('kickoff')) sendTo(c, 'home');
       return;
     case 'done':
       return agentDone(c);
@@ -508,7 +708,7 @@ function goIdle(c, quietMs = 0) {
 }
 
 function tickIdle(c) {
-  if (!c || c.phase !== 'idle' || now() < c.nextIdle) return;
+  if (!c || c.phase !== 'idle' || now() < c.nextIdle || (meeting && meeting.people.has(c))) return;
   c.nextIdle = now() + 5000;
   let act = 'desk';
   try {
@@ -553,6 +753,11 @@ function reset(snap) {
   jobs.clear();
   letters.length = 0;
   timers = [];
+  meeting = null;
+  lastMeetingEnd = -Infinity;
+  nextTea = now() + rand(...TEA_EVERY);
+  errTimes = [];
+  lastTodos = snap.todos || [];
   residentList.forEach(residentReset);
   human.jobs.clear();
   human.label = '';
@@ -635,6 +840,8 @@ function placeUi(c) {
   const walking = c.path.length > 0;
   c.el.style.transform = `translate(${(c.x + 8) * scale}px, ${(c.y + (walking ? 0 : c.oy) + 1) * scale}px)`;
   c.el.style.opacity = c.alpha;
+  // 회의 테이블에 나란히 앉으면 이름표가 겹치니 색 점만 남긴다
+  c.el.classList.toggle('crowd', !walking && !!meeting && meeting.people.has(c));
   const tn = now();
   let b = c.bubble && tn < c.bubble.until ? c.bubble : null;
   if (!b && !walking && c.pose === 'sleep') b = { kind: 'zzz', text: 'z Z z' };
@@ -653,6 +860,8 @@ function step(dt) {
   for (const c of everyone()) c.update(dt);
   tickLetters();
   tickResidents();
+  tickAgents();
+  tickMeeting();
   autoIdle();
   tickIdle(claude);
 }
@@ -745,7 +954,10 @@ let es = null;
 let demo = null;
 const pin = { floor: null, session: null };
 
-const floorOf = key => key && floors.find(f => f.key === key.split('/')[0]);
+// 세션 키는 '기록 폴더/세션 id'. 층은 작업 단위라 폴더와 다를 수 있어서, 세션이 들어 있는 층을 직접 찾는다.
+const sessionKey = s => s.proj + '/' + s.id;
+const floorOf = key => key && floors.find(f => f.sessions.some(s => sessionKey(s) === key));
+const sessionOf = key => { const f = floorOf(key); return f && f.sessions.find(s => sessionKey(s) === key); };
 
 function ago(ms) {
   const s = ms / 1000;
@@ -774,7 +986,7 @@ function renderFloors() {
       const ol = document.createElement('ol');
       ol.className = 'shops';
       for (const s of f.sessions) {
-        const key = f.key + '/' + s.id;
+        const key = sessionKey(s);
         const sl = document.createElement('li');
         sl.innerHTML = '<button><span class="t"></span><span class="ago"></span></button>';
         if (key === current) sl.className = 'on';
@@ -793,7 +1005,7 @@ function renderFloors() {
 
 function renderHeader() {
   const f = floorOf(current);
-  const s = f && f.sessions.find(x => current.endsWith('/' + x.id));
+  const s = sessionOf(current);
   $('#lift-floor').textContent = f ? f.floor + 'F' : '--';
   $('#floor-name').textContent = f ? f.name : '빈 건물';
   const shop = s ? s.title || s.id.slice(0, 8) : '';
@@ -806,7 +1018,7 @@ function desiredSession() {
   let best = null;
   for (const f of floors) {
     if (pin.floor && f.key !== pin.floor) continue;
-    for (const s of f.sessions) if (!best || s.mtime > best.mtime) best = { key: f.key + '/' + s.id, mtime: s.mtime };
+    for (const s of f.sessions) if (!best || s.mtime > best.mtime) best = { key: sessionKey(s), mtime: s.mtime };
   }
   return best && best.key;
 }
@@ -816,9 +1028,8 @@ function maybeSwitch(force) {
   const want = desiredSession();
   if (!want || want === current) return;
   if (!force && current && !pin.session) {
-    const f = floorOf(current);
-    const s = f && f.sessions.find(x => current.endsWith('/' + x.id));
-    const sameScope = !pin.floor || current.startsWith(pin.floor + '/');
+    const s = sessionOf(current);
+    const sameScope = !pin.floor || (floorOf(current) || {}).key === pin.floor;
     if (s && sameScope && Date.now() - s.mtime < 20 * 1000) return;
   }
   switchTo(want);
@@ -877,7 +1088,7 @@ async function boot() {
       letters: () => letters.length,
     };
     if (new URLSearchParams(location.search).has('manual')) {
-      api.setFloors([{ key: 'demo', name: 'manual', floor: 1, mtime: Date.now(), sessions: [{ id: 'x', title: '수동 테스트', mtime: Date.now() }] }], 'demo/x');
+      api.setFloors([{ key: 'demo', name: 'manual', floor: 1, mtime: Date.now(), sessions: [{ id: 'x', proj: 'demo', title: '수동 테스트', mtime: Date.now() }] }], 'demo/x');
       reset({ main: { quietMs: 0 } });
     } else demo = startDemo(api);
     return;

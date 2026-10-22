@@ -4,9 +4,9 @@ const MIN = 60 * 1000, DAY = 24 * 60 * MIN;
 const floors = () => {
   const now = Date.now();
   return [
-    { key: 'demo-blog', name: '블로그 글 목록 페이지', dir: 'my-blog', floor: 1, mtime: now - 9 * DAY, sessions: [{ id: 's1', title: '블로그 글 목록 페이지', mtime: now - 9 * DAY }] },
-    { key: 'demo-cat', name: '고양이 캐릭터 도트 구현', dir: 'nyang-office', floor: 2, mtime: now, sessions: [{ id: 'live', title: '고양이 캐릭터 도트 구현', mtime: now }, { id: 'old', title: '서버 꼬리 읽기 버그', mtime: now - 180 * MIN }] },
-    { key: 'demo-api', name: '로그인 API 테스트', dir: 'burden-api', floor: 3, mtime: now - 40 * MIN, sessions: [{ id: 's9', title: '로그인 API 테스트', mtime: now - 40 * MIN }] },
+    { key: 'work:블로그', name: '블로그 글 목록 페이지', dir: 'my-blog', floor: 1, mtime: now - 9 * DAY, sessions: [{ id: 's1', proj: 'demo-blog', title: '블로그 글 목록 페이지', mtime: now - 9 * DAY }] },
+    { key: 'work:고양이', name: '고양이 캐릭터 도트 구현', dir: 'nyang-office', floor: 2, mtime: now, sessions: [{ id: 'live', proj: 'demo-cat', title: '고양이 캐릭터 도트 구현', mtime: now }, { id: 'old', proj: 'demo-cat', title: '고양이 캐릭터 도트 구현 (fork)', mtime: now - 180 * MIN }] },
+    { key: 'work:로그인', name: '로그인 API 테스트', dir: 'burden-api', floor: 3, mtime: now - 40 * MIN, sessions: [{ id: 's9', proj: 'demo-api', title: '로그인 API 테스트', mtime: now - 40 * MIN }] },
   ];
 };
 
@@ -35,16 +35,21 @@ const SCRIPT = [
   [24500, { k: 'done', a: 'A2' }],
   [26000, { k: 'result', a: 'main', id: 't5' }],
   [26200, { k: 'tool', a: 'main', id: 't6', tool: 'Bash', label: '$ npm test' }],
-  [28500, { k: 'result', a: 'main', id: 't6' }],
-  [29500, { k: 'done', a: 'A1' }],
-  [30500, { k: 'tool', a: 'main', id: 't7', tool: 'mcp__browser__screenshot', label: '🔌 screenshot' }],
-  [33000, { k: 'result', a: 'main', id: 't7' }],
-  [33300, { k: 'tool', a: 'main', id: 't8', tool: 'AskUserQuestion', label: '❓ 고양이 색은 주황이 좋을까요?' }],
-  [38500, { k: 'result', a: 'main', id: 't8' }],
-  [39000, { k: 'say', a: 'main', text: '다 됐어요! 사무실이 고양이들로 가득해졌어요 🐾' }],
-  [39600, { k: 'end', a: 'main' }],
+  [28500, { k: 'result', a: 'main', id: 't6', err: true, text: 'AssertionError: 냥 !== 야옹' }], // 두 번째 실패 → 긴급 회의
+  [31000, { k: 'think', a: 'main', text: '둘 다 실패라니… 테스트 기대값부터 확인하자' }],
+  [32500, { k: 'tool', a: 'main', id: 't9', tool: 'Edit', label: '⌨️ cat.test.js' }],
+  [34500, { k: 'result', a: 'main', id: 't9' }],
+  [34700, { k: 'tool', a: 'main', id: 't10', tool: 'Bash', label: '$ npm test' }],
+  [36800, { k: 'result', a: 'main', id: 't10' }],
+  [37500, { k: 'done', a: 'A1' }],
+  [38500, { k: 'tool', a: 'main', id: 't7', tool: 'mcp__browser__screenshot', label: '🔌 screenshot' }],
+  [41000, { k: 'result', a: 'main', id: 't7' }],
+  [41300, { k: 'tool', a: 'main', id: 't8', tool: 'AskUserQuestion', label: '❓ 고양이 색은 주황이 좋을까요?' }],
+  [46500, { k: 'result', a: 'main', id: 't8' }],
+  [47000, { k: 'say', a: 'main', text: '다 됐어요! 사무실이 고양이들로 가득해졌어요 🐾' }],
+  [47600, { k: 'end', a: 'main' }],
 ];
-const LOOP_MS = 75 * 1000;
+const LOOP_MS = 90 * 1000;
 
 // api: { setFloors(floors, currentKey), reset(snapshot), handle(event) }
 export function startDemo(api) {

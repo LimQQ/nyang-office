@@ -179,8 +179,8 @@ function sessionMeta(file, size) {
   return m;
 }
 
-// cliSessionId → { 앱 사이드바 이름, 지금 작업 폴더 }. 앱 세션 파일(…/local_*.json)은 바뀐 것만 다시 읽는다.
-const appFiles = new Map(); // 파일 → { mtime, cli, title }
+// cliSessionId → { 앱 사이드바 이름, 지금 작업 폴더, 앱 세션 id, 만든 시각 }. 앱 세션 파일(…/local_*.json)은 바뀐 것만 다시 읽는다.
+const appFiles = new Map(); // 파일 → { mtime, cli, title, cwd, appId, createdAt }
 
 function appTitles() {
   const titles = new Map();
@@ -200,7 +200,7 @@ function appTitles() {
           const mtime = fs.statSync(file).mtimeMs;
           if (!hit || hit.mtime !== mtime) {
             const o = JSON.parse(fs.readFileSync(file, 'utf8'));
-            hit = { mtime, cli: o.cliSessionId, title: typeof o.title === 'string' ? o.title.trim() : '', cwd: o.cwd || null };
+            hit = { mtime, cli: o.cliSessionId, title: typeof o.title === 'string' ? o.title.trim() : '', cwd: o.cwd || null, appId: o.sessionId, createdAt: o.createdAt || 0 };
             appFiles.set(file, hit);
           }
         } catch { continue; }
@@ -212,43 +212,105 @@ function appTitles() {
   return titles;
 }
 
+// 앱 사이드바에서 직접 만든 그룹: 앱 세션 id → { id, name }. 앱 설정 파일에서 그룹 이름과 소속만 읽는다.
+const DESKTOP_CONFIG = path.join(path.dirname(APP_SESSIONS), 'claude_desktop_config.json');
+let groupCache = { mtime: -1, map: new Map() };
+
+function appGroups() {
+  let mtime;
+  try { mtime = fs.statSync(DESKTOP_CONFIG).mtimeMs; } catch { return new Map(); }
+  if (mtime === groupCache.mtime) return groupCache.map;
+  const map = new Map();
+  try {
+    const prefs = JSON.parse(fs.readFileSync(DESKTOP_CONFIG, 'utf8')).preferences || {};
+    const perAccount = (prefs.epitaxyPrefs || {})['dframe-code-sections'] || {};
+    for (const acct of Object.values(perAccount)) {
+      for (const sec of acct.sections || []) {
+        if (sec.kind !== 'manual' || !sec.name || !Array.isArray(sec.members)) continue;
+        for (const m of sec.members) map.set(typeof m === 'string' ? m : m && (m.sessionId || m.id), { id: sec.id, name: sec.name });
+      }
+    }
+  } catch {}
+  groupCache = { mtime, map };
+  return map;
+}
+
+// 한 번 알아낸 "기록 → 층" 연결을 기억해 둔다. /clear 뒤에 앱이 예전 기록을 잊어도 원래 작업 층에 남도록.
+const FLOOR_CACHE = path.join(__dirname, '.floors-cache.json');
+const learned = new Map(Object.entries((() => { try { return JSON.parse(fs.readFileSync(FLOOR_CACHE, 'utf8')); } catch { return {}; } })()));
+let learnedDirty = false;
+
+function remember(id, floor) {
+  const old = learned.get(id);
+  if (old && old.key === floor.key && old.name === floor.name) return;
+  learned.set(id, floor);
+  learnedDirty = true;
+}
+
+// "강의 요약 툴 (fork)" → "강의 요약 툴": 갈라져 나온 세션은 원래 작업 층에 합친다
+const workName = t => t.replace(/\s*\((fork|포크)[^)]*\)\s*$/i, '').replace(/\s*\(\d+\)\s*$/, '').trim();
+
+// 층 나누기: ① 앱 사이드바 그룹 ② 앱 세션 이름(작업) ③ 예전에 알아낸 층 ④ 폴더
+function floorFor(id, app, groups, dirFloor) {
+  if (app) {
+    const grp = groups.get(app.appId) || groups.get(id);
+    const floor = grp ? { key: 'group:' + grp.id, name: grp.name, born: app.createdAt }
+      : workName(app.title) ? { key: 'work:' + workName(app.title), name: workName(app.title), born: app.createdAt } : null;
+    if (floor) { remember(id, floor); return floor; }
+  }
+  return learned.get(id) || dirFloor;
+}
+
 let index = { floors: [], at: 0 };
 
 function buildIndex() {
-  const floors = [];
   const named = appTitles();
+  const groups = appGroups();
+  const byKey = new Map();
   let dirs = [];
   try { dirs = fs.readdirSync(PROJECTS, { withFileTypes: true }).filter(d => d.isDirectory()); } catch {}
   for (const d of dirs) {
     const dir = path.join(PROJECTS, d.name);
-    let sessions = [];
+    let files = [];
     try {
       for (const f of fs.readdirSync(dir)) {
         if (!f.endsWith('.jsonl')) continue;
         const st = fs.statSync(path.join(dir, f));
-        sessions.push({ id: f.slice(0, -6), mtime: st.mtimeMs, size: st.size });
+        files.push({ id: f.slice(0, -6), mtime: st.mtimeMs, size: st.size });
       }
     } catch { continue; }
-    if (!sessions.length) continue;
-    sessions.sort((x, y) => y.mtime - x.mtime);
-    sessions = sessions.slice(0, SESSIONS_PER_FLOOR).map(s => {
+    files.sort((x, y) => y.mtime - x.mtime);
+    let born = 0;
+    try { born = fs.statSync(dir).birthtimeMs; } catch {}
+    for (const s of files.slice(0, 30)) {
       const m = sessionMeta(path.join(dir, s.id + '.jsonl'), s.size);
       const app = named.get(s.id);
       // 앱이 아는 작업 폴더가 더 정확하다(세션을 다른 폴더로 옮기면 기록 맨 앞의 cwd 는 옛 폴더로 남는다)
-      return { id: s.id, mtime: s.mtime, title: (app && app.title) || m.title, appTitle: app && app.title, cwd: (app && app.cwd) || m.cwd };
-    });
-    const cwd = (sessions.find(s => s.cwd) || {}).cwd || null;
-    const folder = cwd ? base(cwd) : d.name;
-    // 층 이름은 그 층에서 가장 최근에 움직인 세션의 앱 이름. 앱을 안 쓴 프로젝트는 폴더 이름.
-    const latestNamed = sessions.find(s => s.appTitle);
-    let born = 0;
-    try { born = fs.statSync(dir).birthtimeMs; } catch {}
-    floors.push({ key: d.name, name: latestNamed ? latestNamed.appTitle : folder, dir: folder, cwd, born, mtime: sessions[0].mtime, sessions: sessions.map(({ id, mtime, title }) => ({ id, mtime, title })) });
+      const cwd = (app && app.cwd) || m.cwd;
+      const fl = floorFor(s.id, app, groups, { key: 'dir:' + d.name, name: cwd ? base(cwd) : d.name, born });
+      let floor = byKey.get(fl.key);
+      if (!floor) byKey.set(fl.key, (floor = { key: fl.key, name: fl.name, born: fl.born || born, sessions: [] }));
+      floor.born = Math.min(floor.born, fl.born || born);
+      // proj: 기록 파일이 있는 프로젝트 폴더. 층과 상관없이 /events 로 그 세션을 열 때 쓴다.
+      floor.sessions.push({ id: s.id, proj: d.name, mtime: s.mtime, title: (app && app.title) || m.title, cwd });
+    }
   }
-  // 먼저 생긴 프로젝트가 아래층. 층 번호가 매번 바뀌지 않도록 생성 시각으로 정렬한다.
+  const floors = [...byKey.values()].map(f => {
+    f.sessions.sort((x, y) => y.mtime - x.mtime);
+    f.sessions = f.sessions.slice(0, SESSIONS_PER_FLOOR);
+    const latest = f.sessions[0];
+    return { ...f, mtime: latest.mtime, cwd: latest.cwd || null, dir: latest.cwd ? base(latest.cwd) : latest.proj, sessions: f.sessions.map(({ cwd, ...s }) => s) };
+  });
+  // 같은 폴더에 작업 층이 따로 있으면, 어느 작업인지 모르는 남은 기록 층은 그렇다고 이름에 밝힌다
+  for (const f of floors) if (f.key.startsWith('dir:') && floors.some(o => o !== f && o.dir === f.dir)) f.name = f.dir + ' · 기타 기록';
+  // 먼저 생긴 작업이 아래층. 층 번호가 매번 바뀌지 않도록 생성 시각으로 정렬한다.
   floors.sort((x, y) => x.born - y.born || x.key.localeCompare(y.key));
   floors.forEach((f, i) => { f.floor = i + 1; delete f.born; });
   index = { floors, at: Date.now() };
+  if (learnedDirty) {
+    learnedDirty = false;
+    try { fs.writeFileSync(FLOOR_CACHE, JSON.stringify(Object.fromEntries(learned))); } catch {}
+  }
 }
 
 // ───────────────────────── 세션 하나를 따라 읽는 꼬리 ─────────────────────────

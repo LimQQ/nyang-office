@@ -28,6 +28,7 @@ export const SPOTS = {
   home: [[15, 4, 'down', 0]],                // Claude 팀장 책상
   nap:  [[20, 6, 'down', -2]],               // 낮잠 상자
   seat: [[14, 18, 'up', -3], [16, 18, 'up', -3], [12, 16, 'right', 0], [18, 16, 'left', 0], [12, 17, 'right', 0], [18, 17, 'left', 0]], // 서브에이전트가 앉는 회의 테이블
+  meet: [[15, 15, 'down', 0], [13, 15, 'down', 0], [14, 15, 'down', 0], [16, 15, 'down', 0], [17, 15, 'down', 0], [13, 18, 'up', -3], [15, 18, 'up', -3], [17, 18, 'up', -3]], // 회의 자리(첫 칸은 Claude 상석)
 };
 export const HUMAN_AT = [25, 14];
 export const WHITEBOARD = { x: 12, y: 13, w: 5 };

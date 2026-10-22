@@ -231,6 +231,8 @@ header {
   border-radius: 1px;
   background: var(--dot);
 }
+.cat-ui.crowd .tag { font-size: 0; padding: 2px; }
+.cat-ui.crowd .tag::before { margin: 0; }
 .bubble {
   position: absolute;
   bottom: 2px;
@@ -291,6 +293,7 @@ header {
 #log-list li.err { background: #4a2724; }
 #log-list li.think { color: #c5c9e6; }
 #log-list li.agent { background: #2c3a33; }
+#log-list li.meet { background: #36304a; }
 #log-list time { grid-row: span 2; font: 10px 'GalmuriMono9', monospace; color: var(--muted); }
 #log-list b { font-weight: normal; font-size: 11px; color: var(--muted); }
 #log-list b::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 4px; background: var(--dot); border-radius: 1px; }
