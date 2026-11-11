@@ -52,7 +52,7 @@ const ACK = {
 };
 
 // 창문(개발실 바깥벽): 새가 앉는 곳
-export const WINDOWS = [[16, 0], [19, 0]];
+// 창문 자리는 지도마다 다르다(O.WINDOWS)
 
 // 작은 도트 소품: [x, y, 색]
 const HEART = [[1, 0], [3, 0], [0, 1], [1, 1], [2, 1], [3, 1], [4, 1], [1, 2], [2, 2], [3, 2], [2, 3]];
@@ -136,7 +136,7 @@ export function createOffice(hooks = {}) {
   class Cat {
     constructor(id, look, name, human = false) {
       this.id = id; this.look = look; this.name = name; this.human = human;
-      this.x = 15 * TILE; this.y = 4 * TILE; this.oy = 0;
+      this.x = O.SPOTS.home[0][0] * TILE; this.y = O.SPOTS.home[0][1] * TILE; this.oy = 0;
       this.path = []; this.face = 'down'; this.pose = 'sit'; this.target = null; this.then = null;
       this.room = null; this.claim = null; this.phase = 'work';
       this.alpha = 1; this.fade = 0;
@@ -351,16 +351,34 @@ export function createOffice(hooks = {}) {
     }
   }
 
-  // ───────────────────────── 편지 ─────────────────────────
+  // ───────────────────────── 종이비행기 ─────────────────────────
+  // 일을 맡길 때·답할 때 종이비행기를 날린다. 천천히 활공하다가, 받는 고양이가 폴짝 뛰어올라 잡는다.
 
   const letters = [];
-  const headOf = c => [c.x + 8, c.y + (c.path.length ? 0 : c.oy) + 3];
+  const JUMP_MS = 520;   // 점프 한 번(뛰어올라 내려오기까지)
+  const JUMP_H = 7;      // 점프 높이(px)
+  // 점프 중이면 지금 몇 px 떠 있는지
+  const jumpOf = c => {
+    if (!c.jumpAt) return 0;
+    const q = (now() - c.jumpAt) / JUMP_MS;
+    return q > 0 && q < 1 ? JUMP_H * 4 * q * (1 - q) : 0;
+  };
+  const headOf = c => [c.x + 8, c.y + (c.path.length ? 0 : c.oy) + 3 - jumpOf(c)];
 
-  // 받는 고양이가 걷고 있어도 편지가 따라간다(도착 지점은 매 프레임 다시 계산)
+  // 받는 고양이가 걷고 있어도 비행기가 따라간다(도착 지점은 매 프레임 다시 계산).
+  // 편지보다 두 배쯤 느리게: 1.4~3초
   function sendLetter(from, to, err, onLand) {
     const a = headOf(from), b = headOf(to);
     const dist = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    letters.push({ a, to, dist, t0: now(), dur: Math.min(1300, Math.max(600, dist * 4.5)), err, onLand });
+    const dur = Math.min(3000, Math.max(1400, dist * 9));
+    const l = { a, to, dist, t0: now(), dur, err, onLand, dir: b[0] >= a[0] ? 1 : -1 };
+    letters.push(l);
+    // 비행기가 도착하는 순간이 점프 꼭대기가 되도록 미리 뛰기 시작한다(사람 집사는 손으로 받는다)
+    if (!to.human) after(Math.max(0, dur - JUMP_MS / 2), () => {
+      if (!letters.includes(l)) return;
+      to.jumpAt = now();
+      if (!to.path.length) to.face = l.dir > 0 ? 'left' : 'right';
+    });
   }
 
   function tickLetters() {
@@ -372,29 +390,46 @@ export function createOffice(hooks = {}) {
     }
   }
 
+  // 오른쪽을 보는 종이비행기 9×6 (1 테두리, 2 종이, 3 접힌 날개 그림자)
+  const PLANE = [
+    '11.......',
+    '1221.....',
+    '.1222211.',
+    '.12222221',
+    '..13311..',
+    '...131...',
+  ];
+
   function drawLetters(g) {
     for (const l of letters) {
       const p = Math.min(1, (now() - l.t0) / l.dur);
       const b = headOf(l.to);
+      // 거의 일정한 속도로 활공하고, 위로 둥글게 떴다가 살랑살랑 흔들린다
       const at = q => {
-        const e = q < 0.5 ? 2 * q * q : 1 - (-2 * q + 2) ** 2 / 2;
-        const arc = Math.min(44, l.dist * 0.35) * 4 * e * (1 - e);
-        return [l.a[0] + (b[0] - l.a[0]) * e, l.a[1] + (b[1] - l.a[1]) * e - arc];
+        const e = q * 0.5 + q * q * (3 - 2 * q) * 0.5; // 반은 일정한 속도, 반은 부드러운 출발·도착
+        const arc = Math.min(30, l.dist * 0.25) * 4 * e * (1 - e);
+        const sway = Math.sin(q * Math.PI * 4) * 2 * (1 - q);
+        return [l.a[0] + (b[0] - l.a[0]) * e, l.a[1] + (b[1] - l.a[1]) * e - arc + sway];
       };
-      for (const k of [0.12, 0.06]) { // 꼬리 점선
+      for (const k of [0.09, 0.06, 0.03]) { // 지나온 자리에 바람 점
         if (p - k <= 0) continue;
         const [tx, ty] = at(p - k);
-        g.fillStyle = l.err ? 'rgba(208,80,74,.6)' : 'rgba(255,255,255,.75)';
+        g.fillStyle = l.err ? 'rgba(208,80,74,.5)' : 'rgba(255,255,255,.6)';
         g.fillRect(Math.round(tx), Math.round(ty), 1, 1);
       }
       const [x, y] = at(p);
       const X = Math.round(x) - 4, Y = Math.round(y) - 3;
-      const ink = l.err ? '#a8322c' : '#3a2a22';
-      g.fillStyle = ink; g.fillRect(X, Y, 9, 7);
-      g.fillStyle = l.err ? '#ffd6d1' : '#fffdf5'; g.fillRect(X + 1, Y + 1, 7, 5);
-      g.fillStyle = ink;
-      for (const [dx, dy] of [[1, 1], [2, 2], [3, 3], [4, 3], [5, 3], [6, 2], [7, 1]]) g.fillRect(X + dx, Y + dy, 1, 1);
-      if (!l.err) { g.fillStyle = '#d0504a'; g.fillRect(X + 4, Y + 4, 1, 1); }
+      const ink = l.err ? '#a8322c' : '#3a3f50';
+      const paper = l.err ? '#ffd6d1' : '#fffdf5';
+      const fold = l.err ? '#e8a39b' : '#c9d3e6';
+      PLANE.forEach((row, dy) => {
+        for (let dx = 0; dx < row.length; dx++) {
+          const ch = row[dx];
+          if (ch === '.') continue;
+          g.fillStyle = ch === '1' ? ink : ch === '2' ? paper : fold;
+          g.fillRect(l.dir > 0 ? X + dx : X + 8 - dx, Y + dy, 1, 1);
+        }
+      });
     }
   }
 
@@ -418,7 +453,7 @@ export function createOffice(hooks = {}) {
     const job = { id: ev.id, from, worker, room, label: ev.label, landed: false, startedAt: 0, result: null, done: false, createdAt: now() };
     jobs.set(ev.id, job);
     from.say('speech', `${worker === human ? '집사님' : worker.name}~ ${ev.label}`, 1800);
-    log(from, `📨 ${worker.name} · ${ev.label}`);
+    log(from, `✈️ ${worker.name} · ${ev.label}`);
     sendLetter(from, worker, false, () => land(job));
   }
 
@@ -623,7 +658,8 @@ export function createOffice(hooks = {}) {
     if (kind === 'churu') {
       const people = gather(5, true);
       if (people.length < 2) return false;
-      const spot = [15, 10];
+      const H = O.ROOMS.hall;
+      const spot = [Math.round((H.x0 + H.x1) / 2), Math.round((H.y0 + H.y1) / 2)]; // 복도 한가운데
       surprise = { kind, until: t + 11000, people: new Set(people), at: spot, nextChat: t + 3000 };
       bump(s => { s.sinceChuru = 0; s.churus++; });
       churuPending = false;
@@ -662,13 +698,13 @@ export function createOffice(hooks = {}) {
     if (kind === 'bird') {
       const people = gather(4, true);
       if (!people.length) return false;
-      const win = pick(WINDOWS);
+      const win = pick(O.WINDOWS);
       surprise = { kind, until: t + 12000, people: new Set(people), win, nextChat: t + 2500, birdAt: t };
       log(people[0], '🐦 창밖에 새가 왔다!', 'meet');
       people[0].say('speech', '새다!! 🐦', 1500);
       for (const p of people) {
         enlist(p);
-        const [x, y] = O.nearestFree(win[0], 2, (x, y) => !occupied(x, y, p) && O.roomAt(x, y) === 'dev');
+        const [x, y] = O.nearestFree(win[0], win[1] + 2, (x, y) => !occupied(x, y, p) && O.roomAt(x, y) === 'dev');
         p.goTo({ x, y, face: 'up', pose: 'stand' }, () => { if (surprise && surprise.people.has(p)) p.face = 'up'; });
       }
       return true;
@@ -676,7 +712,7 @@ export function createOffice(hooks = {}) {
     if (kind === 'laser') {
       const people = gather(3, true);
       if (people.length < 2) return false;
-      const dot = randomTile(O.ROOMS.hall, null) || [15, 10];
+      const dot = randomTile(O.ROOMS.hall, null) || [O.ROOMS.hall.x0, O.ROOMS.hall.y0];
       surprise = { kind, until: t + 12000, people: new Set(people), dot: [dot[0] * TILE + 8, dot[1] * TILE + 10], dotTo: null, nextHop: t, nextChat: t + 2000 };
       log(people[0], '🔴 레이저 포인터 발견!', 'meet');
       people[0].say('speech', '빨간 점이다!!', 1500);
@@ -1019,7 +1055,8 @@ export function createOffice(hooks = {}) {
       return;
     }
     const walking = c.path.length > 0;
-    const step = walking && Math.floor(t * (c.speed > 120 ? 12 : 7)) % 2 === 1;
+    const jump = jumpOf(c);
+    const step = (walking && Math.floor(t * (c.speed > 120 ? 12 : 7)) % 2 === 1) || jump > 0; // 점프 중엔 다리를 뻗는다
     const chin = !walking && tn < c.chinUntil;
     const phone = !walking && tn < c.phoneUntil;
     const front = c.face !== 'up' || chin || phone;
@@ -1032,7 +1069,7 @@ export function createOffice(hooks = {}) {
     else if (step) rows = S.CAT_FRONT_STEP;
     else if (blink) rows = S.CAT_FRONT_BLINK;
     else rows = c.face === 'left' ? S.CAT_FRONT_LEFT : c.face === 'right' ? S.CAT_FRONT_RIGHT : S.CAT_FRONT;
-    const X = Math.round(c.x), Y = Math.round(c.y + (walking ? 0 : c.oy)) - (step ? 1 : 0);
+    const X = Math.round(c.x), Y = Math.round(c.y + (walking ? 0 : c.oy) - jump) - (step && !jump ? 1 : 0);
     g.globalAlpha = c.alpha;
     g.drawImage(S.sprite(rows, c.look), X, Y);
     if (c.look.hat && !sleeping) S.stamp(g, S.OV.hat, c.look, X, Y);
@@ -1063,13 +1100,13 @@ export function createOffice(hooks = {}) {
   // 창문: 바깥 하늘이 시간 따라 바뀐다
   function drawWindows(g, hour, t) {
     const sky = skyOf(hour);
-    for (const [wx, wy] of WINDOWS) {
+    for (const [wx, wy] of O.WINDOWS) {
       const X = wx * TILE, Y = wy * TILE;
       g.fillStyle = '#8a7462'; g.fillRect(X + 1, Y + 4, 14, 11);
       g.fillStyle = sky.top; g.fillRect(X + 2, Y + 5, 12, 5);
       g.fillStyle = sky.bottom; g.fillRect(X + 2, Y + 10, 12, 4);
       if (sky.stars) { g.fillStyle = '#fff6c8'; g.fillRect(X + 4, Y + 6, 1, 1); g.fillRect(X + 10, Y + 8, 1, 1); if (Math.floor(t * 1.2 + wx) % 2) g.fillRect(X + 7, Y + 7, 1, 1); }
-      if (wx === WINDOWS[0][0]) {
+      if (wx === O.WINDOWS[0][0]) {
         if (sky.moon) { g.fillStyle = '#f6eebc'; g.fillRect(X + 9, Y + 6, 3, 3); g.fillStyle = sky.top; g.fillRect(X + 10, Y + 6, 2, 2); }
         else if (sky.sun) { g.fillStyle = sky.sun; g.fillRect(X + 9, Y + sky.sunY, 3, 3); }
       } else if (!sky.stars) { g.fillStyle = 'rgba(255,255,255,.85)'; const cx = X + 3 + Math.floor(t / 3) % 7; g.fillRect(cx, Y + 7, 4, 1); g.fillRect(cx + 1, Y + 6, 2, 1); }
@@ -1120,11 +1157,11 @@ export function createOffice(hooks = {}) {
     if (!L.lamps) return;
     const glow = (x, y, w, h) => { g.fillStyle = 'rgba(255,214,140,.16)'; g.fillRect(x - 4, y - 3, w + 8, h + 6); g.fillStyle = 'rgba(255,214,140,.14)'; g.fillRect(x, y, w, h); };
     const lateNight = hour >= 1 && hour < 5;
-    if (!lateNight || (claude && claude.phase === 'work')) glow(14 * TILE, 3 * TILE, 3 * TILE, 3 * TILE); // 팀장 책상
+    if (!lateNight || (claude && claude.phase === 'work')) glow(...O.GLOWS.home); // 팀장 책상
     for (const r of residentList) if (r.state === 'work' || !lateNight) glow(Math.round(r.desk.x * TILE) - 8, Math.round(r.desk.y * TILE) - 10, 32, 30);
-    if (!lateNight || human.jobs.size) glow(24 * TILE, 13 * TILE + 4, 3 * TILE, 2 * TILE);
+    if (!lateNight || human.jobs.size) glow(...O.GLOWS.human);
     // 서버실은 밤새 반짝인다
-    g.fillStyle = 'rgba(94,240,138,.08)'; g.fillRect(23 * TILE, TILE - 8, 8 * TILE, 3 * TILE);
+    g.fillStyle = 'rgba(94,240,138,.08)'; g.fillRect(...O.GLOWS.server);
   }
 
   function draw(g, opts = {}) {
@@ -1160,7 +1197,7 @@ export function createOffice(hooks = {}) {
     if (!b && !walking && c.pose === 'sleep') b = { kind: 'zzz', text: 'z Z z' };
     if (!b && c.label) b = { kind: 'label', text: c.label };
     return {
-      x: c.x + 8, y: c.y + (walking ? 0 : c.oy) + 1, alpha: c.alpha,
+      x: c.x + 8, y: c.y + (walking ? 0 : c.oy) + 1 - jumpOf(c), alpha: c.alpha,
       crowd: !walking && ((!!meeting && meeting.people.has(c)) || (!!surprise && surprise.kind !== 'box' && surprise.people.has(c))),
       bubble: b ? { kind: b.kind, text: b.text } : null,
     };
@@ -1194,6 +1231,8 @@ export function createOffice(hooks = {}) {
     get surprise() { return surprise && { kind: surprise.kind, people: [...surprise.people].map(p => p.id) }; },
     get meeting() { return meeting && { kind: meeting.kind }; },
     letters: () => letters.length,
+    // 날고 있는 종이비행기: 누가 날렸고 누가 받는지, 얼마나 날았는지(0~1)
+    planes: () => letters.map(l => ({ to: l.to.id, progress: Math.min(1, (now() - l.t0) / l.dur), err: !!l.err })),
     now,
   };
 }

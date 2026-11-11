@@ -40,9 +40,10 @@ export class Recorder {
 }
 
 // 배경(바닥·벽)은 변하지 않으니 픽셀로 한 번 굽고, 색마다 가장 큰 사각형들로 다시 쪼개 한 번만 만든다.
-let bgCache = '';
+let bgCache = '', bgLayout = '';
 export function backgroundSvg() {
-  if (bgCache) return bgCache;
+  if (bgCache && bgLayout === O.LAYOUT) return bgCache;
+  bgLayout = O.LAYOUT;
   const rec = new Recorder();
   O.paintBackground(rec);
   const W = O.PW, H = O.PH;
@@ -132,8 +133,7 @@ function staticLabels() {
     const x = r.x0 * O.TILE + 2, y = (r.y1 + 1) * O.TILE - 11, w = textWidth(text, 5) + 5;
     s += `<rect x="${x}" y="${y}" width="${w}" height="8" rx="1.5" fill="rgba(255,255,255,.75)"/><text x="${x + 2.5}" y="${y + 6}" font-size="5" fill="#3a3f50" ${FONT}>${esc(text)}</text>`;
   }
-  s += `<text x="${9 * O.TILE + 32}" y="49" font-size="7" text-anchor="middle" fill="#eef0f4" ${FONT}>EV</text>`;
-  s += `<text x="${10 * O.TILE + 16}" y="${8 * O.TILE - 3.5}" font-size="5" text-anchor="middle" fill="#ffb347" ${FONT}>🐾</text>`;
+  for (const l of O.LABELS) s += `<text x="${l.x}" y="${l.y}" font-size="${l.size}" text-anchor="middle" fill="${l.color}" ${FONT}>${esc(l.text)}</text>`; // 엘리베이터 표지 등
   return s;
 }
 
@@ -149,17 +149,33 @@ function boardSvg(todos) {
   }).join('');
 }
 
-// 한 장면 전체. office: createOffice() 결과
-export function frameSvg(office, { todos = [], hour } = {}) {
+// 화면에 보일 영역(사무실 좌표 px). 없으면 사무실 전체
+const full = () => ({ x: 0, y: 0, w: O.PW, h: O.PH });
+const open = view => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${view.x} ${view.y} ${view.w} ${view.h}" width="${O.PW * 2}" height="${O.PH * 2}" shape-rendering="crispEdges">`;
+
+// 바닥·벽만 그린 아래층. 같은 view 면 늘 같은 글자라 패널이 다시 받지 않는다
+export function backLayerSvg(view = full()) {
+  return open(view) + backgroundSvg() + '</svg>';
+}
+
+// 움직이는 것(가구 불빛·고양이·종이비행기·조명·말풍선)만 그린 위층. 배경이 비쳐 보이도록 투명하다
+// overlay: 맨 위에 덮을 SVG 조각(결정 컷인 등)
+export function frontLayerSvg(office, { todos = [], hour, view = full(), overlay = '' } = {}) {
   const rec = new Recorder();
   office.draw(rec, { hour });
   const cats = office.cats().filter(c => !c.gone);
   const tags = cats.map(c => tagSvg(c, office.uiOf(c))).join('');
   const bubbles = cats.map(c => { const u = office.uiOf(c); return u.bubble && u.alpha > 0.2 ? bubbleSvg(u.x, u.y, u.bubble) : ''; }).join('');
-  const body = backgroundSvg() + rec.svg();
-  const build = ui => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${O.PW} ${O.PH}" width="${O.PW * 2}" height="${O.PH * 2}" shape-rendering="crispEdges">` +
-    body + `<g shape-rendering="auto">${staticLabels()}${boardSvg(todos)}${ui}</g></svg>`;
+  const body = rec.svg();
+  const build = ui => open(view) + body + `<g shape-rendering="auto">${staticLabels()}${boardSvg(todos)}${ui}${overlay}</g></svg>`;
   const svg = build(tags + bubbles);
   // Svg 한 장은 131072 글자까지. 넘칠 것 같으면 말풍선을 뺀다
   return svg.length > 128000 ? build(tags) : svg;
+}
+
+// 한 장면 전체를 한 장으로 (예전 방식 · 테스트용)
+export function frameSvg(office, opts = {}) {
+  const back = backLayerSvg(opts.view);
+  const front = frontLayerSvg(office, opts);
+  return back.replace(/<\/svg>$/, '') + front.replace(/^<svg[^>]*>/, '');
 }

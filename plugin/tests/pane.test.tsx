@@ -36,16 +36,51 @@ test('사무실 패널: 대화 줄을 받아 그림·버튼·일지를 그린다
   for (const surface of ['desktop', 'mobile', 'terminal'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await ui.find({ type: 'Text', text: /server\.js/ })).toBeTruthy()
-    expect(await ui.find({ type: 'Button', key: 'pet-r-dev' })).toBeTruthy()
+    expect(await ui.find({ type: 'Button', key: 'pet-r-dev' })).toBeFalsy() // 쓰다듬기 버튼은 없앴다
     if (surface !== 'terminal') {
-      const svg: any = await ui.find({ type: 'Svg' } as any)
-      expect(svg).toBeTruthy()
-      const src = String(svg.source ?? svg.props?.source ?? '')
-      expect(src.startsWith('<svg')).toBe(true)
-      expect(src.length).toBeLessThan(131072)
+      const svgs: any[] = await ui.findAll({ type: 'Svg' } as any)
+      expect(svgs.length).toBe(1) // 배경과 움직이는 층을 한 장으로
+      for (const svg of svgs) {
+        const src = String(svg.source ?? svg.props?.source ?? '')
+        expect(src.startsWith('<svg')).toBe(true)
+        expect(src.length).toBeLessThan(131072)
+      }
+      // 패널은 세로로 긴 지도(320×368)를 쓴다
+      expect(String(svgs[0].source ?? svgs[0].props?.source)).toContain('width="640" height="736"')
+      expect(await ui.find({ type: 'Button', key: 'zoom' })).toBeFalsy() // 확대는 버튼 없이 가끔 저절로
     }
-    await ui.press({ key: 'pet-r-dev' } as any)
     await ui.press({ key: 'surprise' } as any)
     await ui.unmount()
   }
+})
+
+test('결정 컷인: 질문에 답하면 화면 가득 컷인이 뜬다', async ($, on) => {
+  on('command.register', () => ({ value: { command: 'nyang-office' } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.session.append({
+    uuid: 'q1',
+    door: 'response',
+    origin: { kind: 'model', model: 'x' },
+    message: { type: 'assistant', role: 'assistant', content: [{ type: 'tool_use', id: 'ask1', name: 'AskUserQuestion', input: { questions: [{ question: '어느 쪽?' }] } }] },
+  } as any)
+  const first = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const before: any[] = await first.findAll({ type: 'Svg' } as any)
+  expect(String(before[0].source ?? before[0].props?.source)).not.toContain('#0b0d14')
+  await first.unmount()
+
+  await $.session.append({
+    uuid: 'q2',
+    door: 'tool_result',
+    origin: { kind: 'tool' },
+    message: { type: 'user', role: 'user', content: [{ type: 'tool_result', tool_use_id: 'ask1', content: '왼쪽' }] },
+  } as any)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const svgs: any[] = await ui.findAll({ type: 'Svg' } as any)
+  const front = String(svgs[0].source ?? svgs[0].props?.source)
+  expect(front).toContain('#0b0d14') // 컷인의 어두운 막·테두리
+  expect(front.length).toBeLessThan(131072)
+  await ui.unmount()
 })

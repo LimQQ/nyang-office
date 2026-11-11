@@ -1,40 +1,60 @@
-// 사무실 한 층: 32×20 칸 지도, 방·가구·자리, 길찾기, 배경 그리기.
-export const TILE = 16, W = 32, H = 20;
-export const PW = W * TILE, PH = H * TILE;
-
-export const ROOMS = {
-  library: { name: '자료실', emoji: '📚', x0: 1, y0: 1, x1: 8, y1: 7 },
-  dev:     { name: '개발실', emoji: '💻', x0: 13, y0: 1, x1: 21, y1: 7 },
-  server:  { name: '서버실', emoji: '🗄️', x0: 23, y0: 1, x1: 30, y1: 7 },
-  hall:    { name: '복도', x0: 1, y0: 9, x1: 30, y1: 11 },
-  web:     { name: '정보검색실', emoji: '🌐', x0: 1, y0: 13, x1: 9, y1: 18 },
-  meeting: { name: '회의실', emoji: '🗒️', x0: 11, y0: 13, x1: 20, y1: 18 },
-  boss:    { name: '집사 자리', emoji: '🧑‍💻', x0: 22, y0: 13, x1: 30, y1: 18 },
-};
-
-const DOORS = [[4, 8], [5, 8], [17, 8], [18, 8], [26, 8], [27, 8], [8, 12], [9, 12], [18, 12], [19, 12], [28, 12], [29, 12]];
-export const LIFT_DOORS = [[10, 8], [11, 8]]; // 엘리베이터 문(벽 속), 바로 아래 칸이 타는 곳
+// 사무실 한 층: 칸 지도, 방·가구·자리, 길찾기, 배경 그리기.
+// 지도는 두 가지: 'wide'(웹 화면, 32×20 가로로 긴 층)와 'tall'(Claude 앱 패널, 20×23 세로로 긴 층).
+// useLayout(이름)으로 바꾸면 아래 export let 값들이 통째로 바뀐다(import * as O 로 읽는 쪽은 바로 새 값을 본다).
+export const TILE = 16;
 
 // 자리: [x, y, 바라보는 방향, 세로 보정(px)]. x 가 .5 면 두 칸 사이 가운데.
-// 방마다 한 마리씩 상주하는 담당 고양이의 자리
-export const DESKS = {
-  library: [4.5, 4, 'down', 0],
-  dev:     [17.5, 2, 'up', -4],
-  server:  [26.5, 3, 'up', -4],
-  web:     [4.5, 16, 'up', -4],
-  meeting: [14, 14, 'up', -4],
-};
-export const SPOTS = {
-  home: [[15, 4, 'down', 0]],                // Claude 팀장 책상
-  nap:  [[20, 6, 'down', -2]],               // 낮잠 상자
-  seat: [[14, 18, 'up', -3], [16, 18, 'up', -3], [12, 16, 'right', 0], [18, 16, 'left', 0], [12, 17, 'right', 0], [18, 17, 'left', 0]], // 서브에이전트가 앉는 회의 테이블
-  meet: [[15, 15, 'down', 0], [13, 15, 'down', 0], [14, 15, 'down', 0], [16, 15, 'down', 0], [17, 15, 'down', 0], [13, 18, 'up', -3], [15, 18, 'up', -3], [17, 18, 'up', -3]], // 회의 자리(첫 칸은 Claude 상석)
-};
-export const HUMAN_AT = [25, 14];
-export const WHITEBOARD = { x: 12, y: 13, w: 5 };
-
+// DESKS: 방마다 한 마리씩 상주하는 담당 고양이의 자리
+// SPOTS.home: Claude 팀장 책상 / nap: 낮잠 상자 / seat: 서브에이전트가 앉는 회의 테이블 / meet: 회의 자리(첫 칸은 Claude 상석)
 // act: 그 방 담당 고양이가 일하는 동안 화면이 켜진다(방 이름).
-export const FURNITURE = [
+// GLOWS: 밤에 켜지는 불빛 { home: 팀장 책상, human: 집사 책상, server: 서버실 } [x, y, w, h] px
+// LABELS: 지도 위 글자(엘리베이터 표지 등)
+const LAYOUTS = {};
+
+LAYOUTS.wide = {
+  W: 32, H: 20,
+  ROOMS: {
+    library: { name: '자료실', emoji: '📚', x0: 1, y0: 1, x1: 8, y1: 7 },
+    dev:     { name: '개발실', emoji: '💻', x0: 13, y0: 1, x1: 21, y1: 7 },
+    server:  { name: '서버실', emoji: '🗄️', x0: 23, y0: 1, x1: 30, y1: 7 },
+    hall:    { name: '복도', x0: 1, y0: 9, x1: 30, y1: 11 },
+    web:     { name: '정보검색실', emoji: '🌐', x0: 1, y0: 13, x1: 9, y1: 18 },
+    meeting: { name: '회의실', emoji: '🗒️', x0: 11, y0: 13, x1: 20, y1: 18 },
+    boss:    { name: '집사 자리', emoji: '🧑‍💻', x0: 22, y0: 13, x1: 30, y1: 18 },
+  },
+  DOORS: [[4, 8], [5, 8], [17, 8], [18, 8], [26, 8], [27, 8], [8, 12], [9, 12], [18, 12], [19, 12], [28, 12], [29, 12]],
+  LIFT_DOORS: [[10, 8], [11, 8]], // 엘리베이터 문(벽 속), 바로 아래 칸이 타는 곳
+  WINDOWS: [[16, 0], [19, 0]],
+  DESKS: {
+    library: [4.5, 4, 'down', 0],
+    dev:     [17.5, 2, 'up', -4],
+    server:  [26.5, 3, 'up', -4],
+    web:     [4.5, 16, 'up', -4],
+    meeting: [14, 14, 'up', -4],
+  },
+  SPOTS: {
+    home: [[15, 4, 'down', 0]],
+    nap:  [[20, 6, 'down', -2]],
+    seat: [[14, 18, 'up', -3], [16, 18, 'up', -3], [12, 16, 'right', 0], [18, 16, 'left', 0], [12, 17, 'right', 0], [18, 17, 'left', 0]],
+    meet: [[15, 15, 'down', 0], [13, 15, 'down', 0], [14, 15, 'down', 0], [16, 15, 'down', 0], [17, 15, 'down', 0], [13, 18, 'up', -3], [15, 18, 'up', -3], [17, 18, 'up', -3]],
+  },
+  HUMAN_AT: [25, 14],
+  WHITEBOARD: { x: 12, y: 13, w: 5 },
+  GLOWS: { home: [14 * 16, 3 * 16, 48, 48], human: [24 * 16, 13 * 16 + 4, 48, 32], server: [23 * 16, 16 - 8, 8 * 16, 48] },
+  LABELS: [
+    { text: 'EV', x: 9 * 16 + 32, y: 49, size: 7, color: '#eef0f4' },
+    { text: '🐾', x: 10 * 16 + 16, y: 8 * 16 - 3.5, size: 5, color: '#ffb347' },
+  ],
+  decor(g, rect) {
+    // 엘리베이터 통로(자료실과 개발실 사이)
+    rect(g, 9 * TILE, 0, 4 * TILE, 8 * TILE + 5, '#7e858d');
+    rect(g, 9 * TILE + 2, 2, 4 * TILE - 4, 8 * TILE - 2, '#949ba3');
+    for (let y = 8; y < 120; y += 14) { rect(g, 9 * TILE + 4, y, 1, 1, '#6c737b'); rect(g, 13 * TILE - 5, y, 1, 1, '#6c737b'); }
+    rect(g, 9 * TILE + 18, 40, 28, 12, '#5f666e'); // EV 표지판 자리(글자는 화면 위에)
+    worldMap(g, rect, 2 * TILE + 2, 12 * TILE);
+    rug(g, rect, 23 * TILE + 8, 15 * TILE + 8);
+  },
+  FURNITURE: [
   { type: 'shelf', x: 1, y: 1, w: 3, h: 2 },
   { type: 'cabinet', x: 4, y: 1, w: 2, h: 1 },
   { type: 'shelf', x: 6, y: 1, w: 3, h: 2 },
@@ -75,20 +95,121 @@ export const FURNITURE = [
   { type: 'plant', x: 1, y: 9, w: 1, h: 1 },
   { type: 'plant', x: 30, y: 11, w: 1, h: 1 },
   { type: 'bench', x: 20, y: 9, w: 3, h: 1 },
-];
-for (const f of FURNITURE) f.z = (f.y + f.h) * TILE + (f.zAdd || 0) - (f.type === 'boxBack' ? TILE - 1 : 0);
+  ],
+};
+
+// Claude 앱 패널용 세로 지도 (20×23). 가운데 세로 복도를 두고 양쪽에 방이 세 층씩 쌓여 있다.
+//   y 2~7   자료실 | 복도 | 개발실(팀장 책상)
+//   y 9~14  서버실 | 복도 | 정보검색실
+//   y 16~21 회의실 | 복도 | 집사 자리
+// 엘리베이터는 복도 맨 위 벽에 있다.
+LAYOUTS.tall = {
+  W: 20, H: 23,
+  ROOMS: {
+    library: { name: '자료실', emoji: '📚', x0: 1, y0: 2, x1: 7, y1: 7 },
+    dev:     { name: '개발실', emoji: '💻', x0: 12, y0: 2, x1: 18, y1: 7 },
+    server:  { name: '서버실', emoji: '🗄️', x0: 1, y0: 9, x1: 7, y1: 14 },
+    web:     { name: '정보검색실', emoji: '🌐', x0: 12, y0: 9, x1: 18, y1: 14 },
+    meeting: { name: '회의실', emoji: '🗒️', x0: 1, y0: 16, x1: 7, y1: 21 },
+    boss:    { name: '집사 자리', emoji: '🧑‍💻', x0: 12, y0: 16, x1: 18, y1: 21 },
+    hall:    { name: '복도', x0: 9, y0: 2, x1: 10, y1: 21 },
+  },
+  DOORS: [[8, 4], [8, 5], [11, 4], [11, 5], [8, 11], [8, 12], [11, 12], [11, 13], [8, 17], [8, 18], [11, 17], [11, 18]],
+  LIFT_DOORS: [[9, 1], [10, 1]],
+  WINDOWS: [[14, 1], [18, 1]],
+  DESKS: {
+    library: [4, 4, 'down', 0],
+    dev:     [16.5, 3, 'up', -4],
+    server:  [4.5, 11, 'up', -4],
+    web:     [15.5, 12, 'up', -4],
+    meeting: [4, 17, 'up', -4],
+  },
+  SPOTS: {
+    home: [[14, 5, 'down', 0]],
+    nap:  [[18, 6, 'down', -2]],
+    seat: [[3, 21, 'up', -3], [5, 21, 'up', -3], [1, 19, 'right', 0], [7, 19, 'left', 0], [1, 20, 'right', 0], [7, 20, 'left', 0]],
+    meet: [[4, 18, 'down', 0], [2, 18, 'down', 0], [3, 18, 'down', 0], [5, 18, 'down', 0], [6, 18, 'down', 0], [2, 21, 'up', -3], [4, 21, 'up', -3], [6, 21, 'up', -3]],
+  },
+  HUMAN_AT: [14, 17],
+  WHITEBOARD: { x: 2, y: 16, w: 5 },
+  GLOWS: { home: [13 * 16, 4 * 16, 48, 48], human: [13 * 16, 16 * 16 + 4, 48, 32], server: [1 * 16, 9 * 16 - 8, 7 * 16, 48] },
+  LABELS: [{ text: '🐾', x: 10 * 16, y: 1 * 16 - 3.5, size: 5, color: '#ffb347' }],
+  decor(g, rect) {
+    worldMap(g, rect, 12 * TILE + 2, 8 * TILE);
+    rug(g, rect, 12 * TILE + 8, 18 * TILE + 8);
+  },
+  FURNITURE: [
+    // 자료실
+    { type: 'shelf', x: 1, y: 2, w: 3, h: 2 },
+    { type: 'shelf', x: 5, y: 2, w: 3, h: 2 },
+    { type: 'table', x: 3, y: 6, w: 3, h: 1 },
+    { type: 'plant', x: 1, y: 7, w: 1, h: 1 },
+    // 개발실
+    { type: 'desk', x: 12, y: 2, w: 2, h: 1, pc: 'imac' },
+    { type: 'desk', x: 16, y: 2, w: 2, h: 1, pc: 'imac', act: 'dev' },
+    { type: 'desk', x: 13, y: 6, w: 3, h: 1, home: true },
+    { type: 'boxBack', x: 18, y: 6, w: 1, h: 1, walk: true },
+    { type: 'boxFront', x: 18, y: 6, w: 1, h: 1, walk: true, zAdd: 0.5 },
+    { type: 'plant', x: 12, y: 7, w: 1, h: 1 },
+    // 서버실
+    { type: 'rack', x: 1, y: 9, w: 2, h: 2 },
+    { type: 'rack', x: 4, y: 9, w: 2, h: 2 },
+    { type: 'rack', x: 6, y: 9, w: 2, h: 2 },
+    { type: 'console', x: 1, y: 14, w: 3, h: 1 },
+    { type: 'aircon', x: 7, y: 13, w: 1, h: 2 },
+    // 정보검색실
+    { type: 'desk', x: 12, y: 11, w: 2, h: 1, pc: 'globe' },
+    { type: 'desk', x: 15, y: 11, w: 2, h: 1, pc: 'globe', act: 'web' },
+    { type: 'globe', x: 12, y: 14, w: 1, h: 1 },
+    { type: 'plant', x: 18, y: 14, w: 1, h: 1 },
+    // 회의실
+    { type: 'whiteboard', x: 2, y: 16, w: 5, h: 1 },
+    { type: 'mtable', x: 2, y: 19, w: 5, h: 2 },
+    { type: 'plant', x: 7, y: 16, w: 1, h: 1 },
+    // 집사 자리
+    { type: 'bossdesk', x: 13, y: 18, w: 3, h: 1 },
+    { type: 'sofa', x: 17, y: 21, w: 2, h: 1 },
+    { type: 'cattower', x: 12, y: 20, w: 1, h: 2 },
+    { type: 'plant', x: 18, y: 16, w: 1, h: 1 },
+  ],
+};
+
+function worldMap(g, rect, X, Y) { // 정보검색실 벽의 세계지도
+  rect(g, X, Y + 6, 54, 8, '#cfe6f7');
+  for (const [x, y, w, h] of [[6, 7, 9, 3], [12, 9, 5, 4], [22, 7, 10, 4], [30, 10, 6, 3], [40, 7, 8, 5], [48, 11, 5, 2]]) rect(g, X + x, Y + y, w, h, '#7cc47f');
+}
+function rug(g, rect, X, Y) { // 집사 자리 러그
+  rect(g, X, Y, 4 * TILE, 3 * TILE - 4, '#9e4a4a');
+  rect(g, X + 2, Y + 2, 4 * TILE - 4, 3 * TILE - 8, '#b65c5c');
+}
+
+// 지금 쓰는 지도 (useLayout 이 바꾼다)
+export let LAYOUT = 'wide';
+export let W, H, PW, PH, ROOMS, DOORS, LIFT_DOORS, WINDOWS, DESKS, SPOTS, HUMAN_AT, WHITEBOARD, GLOWS, LABELS, FURNITURE;
+let decor = () => {};
 
 // ───────────────────────── 지도와 길찾기 ─────────────────────────
 
 const FLOOR = 0, WALL = 1, LIFT = 2;
-const grid = Array.from({ length: H }, () => new Array(W).fill(WALL));
-for (const r of Object.values(ROOMS)) for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) grid[y][x] = FLOOR;
-for (const [x, y] of DOORS) grid[y][x] = FLOOR;
-for (const [x, y] of LIFT_DOORS) grid[y][x] = LIFT;
+let grid, blocked;
 
-const blocked = new Uint8Array(W * H);
-for (const f of FURNITURE) if (!f.walk) for (let y = f.y; y < f.y + f.h; y++) for (let x = f.x; x < f.x + f.w; x++) blocked[y * W + x] = 1;
-blocked[HUMAN_AT[1] * W + HUMAN_AT[0]] = 1;
+export function useLayout(name) {
+  const L = LAYOUTS[name];
+  if (!L) throw new Error('없는 지도: ' + name);
+  LAYOUT = name;
+  ({ W, H, ROOMS, DOORS, LIFT_DOORS, WINDOWS, DESKS, SPOTS, HUMAN_AT, WHITEBOARD, GLOWS, LABELS, FURNITURE } = L);
+  PW = W * TILE; PH = H * TILE;
+  decor = L.decor;
+  for (const f of FURNITURE) f.z = (f.y + f.h) * TILE + (f.zAdd || 0) - (f.type === 'boxBack' ? TILE - 1 : 0);
+  grid = Array.from({ length: H }, () => new Array(W).fill(WALL));
+  for (const r of Object.values(ROOMS)) for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) grid[y][x] = FLOOR;
+  for (const [x, y] of DOORS) grid[y][x] = FLOOR;
+  for (const [x, y] of LIFT_DOORS) grid[y][x] = LIFT;
+  blocked = new Uint8Array(W * H);
+  for (const f of FURNITURE) if (!f.walk) for (let y = f.y; y < f.y + f.h; y++) for (let x = f.x; x < f.x + f.w; x++) blocked[y * W + x] = 1;
+  blocked[HUMAN_AT[1] * W + HUMAN_AT[0]] = 1;
+}
+useLayout('wide');
 
 export function walkable(x, y) {
   return x >= 0 && y >= 0 && x < W && y < H && grid[y][x] === FLOOR && !blocked[y * W + x];
@@ -178,22 +299,12 @@ export function paintBackground(g) {
       rect(g, X, Y, 16, 1, '#7d6b5f');
     }
   }
-  // 엘리베이터 통로(자료실과 개발실 사이)
-  rect(g, 9 * TILE, 0, 4 * TILE, 8 * TILE + 5, '#7e858d');
-  rect(g, 9 * TILE + 2, 2, 4 * TILE - 4, 8 * TILE - 2, '#949ba3');
-  for (let y = 8; y < 120; y += 14) { rect(g, 9 * TILE + 4, y, 1, 1, '#6c737b'); rect(g, 13 * TILE - 5, y, 1, 1, '#6c737b'); }
-  rect(g, 9 * TILE + 18, 40, 28, 12, '#5f666e'); // EV 표지판 자리(글자는 화면 위에)
-  // 정보검색실 벽의 세계지도
-  rect(g, 2 * TILE + 2, 12 * TILE + 6, 54, 8, '#cfe6f7');
-  for (const [x, y, w, h] of [[6, 7, 9, 3], [12, 9, 5, 4], [22, 7, 10, 4], [30, 10, 6, 3], [40, 7, 8, 5], [48, 11, 5, 2]]) rect(g, 2 * TILE + 2 + x, 12 * TILE + y, w, h, '#7cc47f');
-  // 집사 자리 러그
-  rect(g, 23 * TILE + 8, 15 * TILE + 8, 4 * TILE, 3 * TILE - 4, '#9e4a4a');
-  rect(g, 23 * TILE + 10, 15 * TILE + 10, 4 * TILE - 4, 3 * TILE - 8, '#b65c5c');
+  decor(g, rect); // 지도마다 다른 장식(엘리베이터 통로·세계지도·러그)
 }
 
 // open: 0(닫힘) ~ 1(활짝)
 export function drawLift(g, open) {
-  const X = 10 * TILE, Y = 8 * TILE;
+  const X = LIFT_DOORS[0][0] * TILE, Y = LIFT_DOORS[0][1] * TILE;
   rect(g, X - 2, Y, 36, 16, '#6f7780');
   rect(g, X + 1, Y + 2, 30, 14, '#262b33');
   const half = Math.round(15 * (1 - open));
