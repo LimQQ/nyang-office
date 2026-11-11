@@ -1,0 +1,5 @@
+{
+  "name": "nyang-office",
+  "owner": { "name": "LimQQ" },
+  "plugins": [{ "name": "nyang-office", "source": "./plugin" }]
+}

@@ -156,6 +156,8 @@ export function sprite(rows, look) {
   if (!byLook) cache.set(rows, (byLook = new Map()));
   let cv = byLook.get(look.id);
   if (cv) return cv;
+  // 캔버스가 없는 곳(Claude 앱 패널)에서는 그릴 거리만 넘겨 준다
+  if (typeof document === 'undefined') { cv = { rows, look }; byLook.set(look.id, cv); return cv; }
   cv = document.createElement('canvas');
   cv.width = cv.height = 16;
   const g = cv.getContext('2d');
@@ -187,5 +189,5 @@ export function stamp(g, pixels, look, ox, oy) {
 }
 
 for (const [name, rows] of Object.entries({ CAT_FRONT, CAT_BACK, CAT_SLEEP, HUMAN_FRONT, CAT_FRONT_STEP, CAT_BACK_STEP, CAT_FRONT_BLINK, CAT_FRONT_LEFT, CAT_FRONT_RIGHT })) {
-  rows.forEach((r, i) => { if (r.length !== 16) console.warn(`sprite ${name} 줄 ${i} 길이 ${r.length}`); });
+  rows.forEach((r, i) => { if (r.length !== 16) throw new Error(`sprite ${name} 줄 ${i} 길이 ${r.length}`); });
 }

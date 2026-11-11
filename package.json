@@ -4,7 +4,8 @@
   "description": "Claude Code 작업을 도트 고양이 사무실로 보여 주는 로컬 대시보드",
   "private": true,
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "sync-plugin": "node scripts/sync-plugin.js"
   },
   "engines": {
     "node": ">=18"

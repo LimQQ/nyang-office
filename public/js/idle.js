@@ -11,6 +11,14 @@
 //   'wander'  복도 어슬렁 (부를 때마다 새 목적지로)
 //   'nap'     개발실 구석 상자에 쏙 들어가 잠
 export function chooseIdleActivity(idleSec, ctx) {
-  // TODO(직접 구현): 시간이 흐를수록 고양이답게 바뀌도록 5~10줄로 정해 보세요.
-  return 'desk';
+  // 부하 직원이 아직 일하는 중이면 자리에서 기다린다
+  if (ctx.agentsBusy > 0) return 'desk';
+  // 늦은 밤에는 금방 졸린다
+  const night = ctx.hour >= 23 || ctx.hour < 6;
+  if (night) return idleSec < 15 ? 'groom' : 'nap';
+  if (idleSec < 15) return 'desk';
+  if (idleSec < 35) return 'groom';
+  // 한동안은 복도를 어슬렁거리다가 가끔 멈춰 그루밍
+  if (idleSec < 150) return Math.floor(idleSec / 5) % 4 === 3 ? 'groom' : 'wander';
+  return 'nap';
 }

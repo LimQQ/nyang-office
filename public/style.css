@@ -272,6 +272,7 @@ header {
 }
 .bubble.thought::before { content: '💭 '; }
 .bubble.error { color: #fff; background: var(--red); border-color: #6e1a14; }
+.bubble.pet { color: #7a2343; background: #ffe1ea; border-color: #c4557a; }
 .bubble.zzz {
   padding: 0;
   font-weight: bold;
@@ -287,7 +288,9 @@ header {
 
 /* ── 업무 일지 ── */
 #log { background: var(--panel); border-left: 2px solid var(--line); padding: 16px 14px; overflow: auto; }
-#log h2 { font: 15px 'Galmuri14', 'Galmuri11', sans-serif; margin: 0 0 10px; }
+#log h2 { font: 15px 'Galmuri14', 'Galmuri11', sans-serif; margin: 0 0 6px; }
+#champ { margin: 0 0 10px; padding: 5px 8px; background: #3a3322; border: 2px solid #6b5a2a; border-radius: 4px; color: #f2c94c; font-size: 11px; }
+#sky { font-size: 11px; color: var(--muted); white-space: nowrap; }
 #log-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 #log-list li { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; padding: 6px 8px; background: var(--panel-2); border-radius: 4px; }
 #log-list li.err { background: #4a2724; }
