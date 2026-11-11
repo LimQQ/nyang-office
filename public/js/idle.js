@@ -9,7 +9,7 @@
 //   'desk'    자기 자리에 앉아 있기
 //   'groom'   그 자리에서 그루밍(앞발 핥기)
 //   'wander'  복도 어슬렁 (부를 때마다 새 목적지로)
-//   'nap'     개발실 구석 상자에 쏙 들어가 잠
+//   'nap'     팀장실 구석 상자에 쏙 들어가 잠
 export function chooseIdleActivity(idleSec, ctx) {
   // 부하 직원이 아직 일하는 중이면 자리에서 기다린다
   if (ctx.agentsBusy > 0) return 'desk';

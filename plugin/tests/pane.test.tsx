@@ -54,7 +54,7 @@ test('사무실 패널: 대화 줄을 받아 그림·버튼·일지를 그린다
   }
 })
 
-test('결정 컷인: 질문에 답하면 화면 가득 컷인이 뜬다', async ($, on) => {
+test('결정 컷인: 집사가 질문에 답하는 건 고양이들의 결정이 아니라 컷인이 뜨지 않는다', async ($, on) => {
   on('command.register', () => ({ value: { command: 'nyang-office' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -80,7 +80,7 @@ test('결정 컷인: 질문에 답하면 화면 가득 컷인이 뜬다', async 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const svgs: any[] = await ui.findAll({ type: 'Svg' } as any)
   const front = String(svgs[0].source ?? svgs[0].props?.source)
-  expect(front).toContain('#0b0d14') // 컷인의 어두운 막·테두리
+  expect(front).not.toContain('#0b0d14') // 컷인은 고양이 회의가 무언가를 정했을 때만
   expect(front.length).toBeLessThan(131072)
   await ui.unmount()
 })

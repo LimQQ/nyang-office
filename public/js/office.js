@@ -20,7 +20,7 @@ LAYOUTS.wide = {
     hall:    { name: '복도', x0: 1, y0: 9, x1: 30, y1: 11 },
     web:     { name: '정보검색실', emoji: '🌐', x0: 1, y0: 13, x1: 9, y1: 18 },
     meeting: { name: '회의실', emoji: '🗒️', x0: 11, y0: 13, x1: 20, y1: 18 },
-    boss:    { name: '집사 자리', emoji: '🧑‍💻', x0: 22, y0: 13, x1: 30, y1: 18 },
+    boss:    { name: '팀장실', emoji: '🐾', x0: 22, y0: 13, x1: 30, y1: 18 }, // 팀장냥 자리(예전 집사 자리)
   },
   DOORS: [[4, 8], [5, 8], [17, 8], [18, 8], [26, 8], [27, 8], [8, 12], [9, 12], [18, 12], [19, 12], [28, 12], [29, 12]],
   LIFT_DOORS: [[10, 8], [11, 8]], // 엘리베이터 문(벽 속), 바로 아래 칸이 타는 곳
@@ -33,14 +33,14 @@ LAYOUTS.wide = {
     meeting: [14, 14, 'up', -4],
   },
   SPOTS: {
-    home: [[15, 4, 'down', 0]],
-    nap:  [[20, 6, 'down', -2]],
+    home: [[25, 14, 'down', 0]], // 팀장냥 자리 = 팀장실 책상
+    nap:  [[29, 15, 'down', -2]], // 낮잠 상자는 팀장실 구석(팀장 책상 옆)
     seat: [[14, 18, 'up', -3], [16, 18, 'up', -3], [12, 16, 'right', 0], [18, 16, 'left', 0], [12, 17, 'right', 0], [18, 17, 'left', 0]],
     meet: [[15, 15, 'down', 0], [13, 15, 'down', 0], [14, 15, 'down', 0], [16, 15, 'down', 0], [17, 15, 'down', 0], [13, 18, 'up', -3], [15, 18, 'up', -3], [17, 18, 'up', -3]],
   },
   HUMAN_AT: [25, 14],
   WHITEBOARD: { x: 12, y: 13, w: 5 },
-  GLOWS: { home: [14 * 16, 3 * 16, 48, 48], human: [24 * 16, 13 * 16 + 4, 48, 32], server: [23 * 16, 16 - 8, 8 * 16, 48] },
+  GLOWS: { home: [24 * 16, 13 * 16 + 4, 48, 32], human: [24 * 16, 13 * 16 + 4, 48, 32], server: [23 * 16, 16 - 8, 8 * 16, 48] },
   LABELS: [
     { text: 'EV', x: 9 * 16 + 32, y: 49, size: 7, color: '#eef0f4' },
     { text: '🐾', x: 10 * 16 + 16, y: 8 * 16 - 3.5, size: 5, color: '#ffb347' },
@@ -65,10 +65,10 @@ LAYOUTS.wide = {
   { type: 'desk', x: 14, y: 1, w: 2, h: 1, pc: 'imac' },
   { type: 'desk', x: 17, y: 1, w: 2, h: 1, pc: 'imac', act: 'dev' },
   { type: 'desk', x: 20, y: 1, w: 2, h: 1, pc: 'imac' },
-  { type: 'desk', x: 14, y: 5, w: 3, h: 1, home: true },
+  { type: 'desk', x: 14, y: 5, w: 3, h: 1, pc: 'imac' }, // 팀장냥이 팀장실로 옮겨 가서 빈 책상
   { type: 'plant', x: 13, y: 7, w: 1, h: 1 },
-  { type: 'boxBack', x: 20, y: 6, w: 1, h: 1, walk: true },
-  { type: 'boxFront', x: 20, y: 6, w: 1, h: 1, walk: true, zAdd: 0.5 },
+  { type: 'boxBack', x: 29, y: 15, w: 1, h: 1, walk: true },
+  { type: 'boxFront', x: 29, y: 15, w: 1, h: 1, walk: true, zAdd: 0.5 },
 
   { type: 'rack', x: 23, y: 1, w: 2, h: 2 },
   { type: 'rack', x: 26, y: 1, w: 2, h: 2 },
@@ -99,9 +99,9 @@ LAYOUTS.wide = {
 };
 
 // Claude 앱 패널용 세로 지도 (20×23). 가운데 세로 복도를 두고 양쪽에 방이 세 층씩 쌓여 있다.
-//   y 2~7   자료실 | 복도 | 개발실(팀장 책상)
+//   y 2~7   자료실 | 복도 | 개발실
 //   y 9~14  서버실 | 복도 | 정보검색실
-//   y 16~21 회의실 | 복도 | 집사 자리
+//   y 16~21 회의실 | 복도 | 팀장실(팀장냥 책상)
 // 엘리베이터는 복도 맨 위 벽에 있다.
 LAYOUTS.tall = {
   W: 20, H: 23,
@@ -111,7 +111,7 @@ LAYOUTS.tall = {
     server:  { name: '서버실', emoji: '🗄️', x0: 1, y0: 9, x1: 7, y1: 14 },
     web:     { name: '정보검색실', emoji: '🌐', x0: 12, y0: 9, x1: 18, y1: 14 },
     meeting: { name: '회의실', emoji: '🗒️', x0: 1, y0: 16, x1: 7, y1: 21 },
-    boss:    { name: '집사 자리', emoji: '🧑‍💻', x0: 12, y0: 16, x1: 18, y1: 21 },
+    boss:    { name: '팀장실', emoji: '🐾', x0: 12, y0: 16, x1: 18, y1: 21 }, // 팀장냥 자리(예전 집사 자리)
     hall:    { name: '복도', x0: 9, y0: 2, x1: 10, y1: 21 },
   },
   DOORS: [[8, 4], [8, 5], [11, 4], [11, 5], [8, 11], [8, 12], [11, 12], [11, 13], [8, 17], [8, 18], [11, 17], [11, 18]],
@@ -125,14 +125,14 @@ LAYOUTS.tall = {
     meeting: [4, 17, 'up', -4],
   },
   SPOTS: {
-    home: [[14, 5, 'down', 0]],
-    nap:  [[18, 6, 'down', -2]],
+    home: [[14, 17, 'down', 0]], // 팀장냥 자리 = 팀장실 책상(예전 집사 자리)
+    nap:  [[17, 18, 'down', -2]], // 낮잠 상자는 팀장실 구석(팀장 책상 옆)
     seat: [[3, 21, 'up', -3], [5, 21, 'up', -3], [1, 19, 'right', 0], [7, 19, 'left', 0], [1, 20, 'right', 0], [7, 20, 'left', 0]],
     meet: [[4, 18, 'down', 0], [2, 18, 'down', 0], [3, 18, 'down', 0], [5, 18, 'down', 0], [6, 18, 'down', 0], [2, 21, 'up', -3], [4, 21, 'up', -3], [6, 21, 'up', -3]],
   },
   HUMAN_AT: [14, 17],
   WHITEBOARD: { x: 2, y: 16, w: 5 },
-  GLOWS: { home: [13 * 16, 4 * 16, 48, 48], human: [13 * 16, 16 * 16 + 4, 48, 32], server: [1 * 16, 9 * 16 - 8, 7 * 16, 48] },
+  GLOWS: { home: [13 * 16, 16 * 16 + 4, 48, 32], human: [13 * 16, 16 * 16 + 4, 48, 32], server: [1 * 16, 9 * 16 - 8, 7 * 16, 48] },
   LABELS: [{ text: '🐾', x: 10 * 16, y: 1 * 16 - 3.5, size: 5, color: '#ffb347' }],
   decor(g, rect) {
     worldMap(g, rect, 12 * TILE + 2, 8 * TILE);
@@ -147,9 +147,9 @@ LAYOUTS.tall = {
     // 개발실
     { type: 'desk', x: 12, y: 2, w: 2, h: 1, pc: 'imac' },
     { type: 'desk', x: 16, y: 2, w: 2, h: 1, pc: 'imac', act: 'dev' },
-    { type: 'desk', x: 13, y: 6, w: 3, h: 1, home: true },
-    { type: 'boxBack', x: 18, y: 6, w: 1, h: 1, walk: true },
-    { type: 'boxFront', x: 18, y: 6, w: 1, h: 1, walk: true, zAdd: 0.5 },
+    { type: 'desk', x: 13, y: 6, w: 3, h: 1, pc: 'imac' }, // 팀장냥이 팀장실로 옮겨 가서 빈 책상
+    { type: 'boxBack', x: 17, y: 18, w: 1, h: 1, walk: true },
+    { type: 'boxFront', x: 17, y: 18, w: 1, h: 1, walk: true, zAdd: 0.5 },
     { type: 'plant', x: 12, y: 7, w: 1, h: 1 },
     // 서버실
     { type: 'rack', x: 1, y: 9, w: 2, h: 2 },
@@ -415,6 +415,17 @@ function drawCatTower(g, f) {
   rect(g, X + 6, Y + 4, 4, 36, '#e3d2b5'); for (let i = 0; i < 9; i++) rect(g, X + 6, Y + 6 + i * 4, 4, 1, '#cdb894');
   rect(g, X + 1, Y + 2, 14, 4, '#9c6b4a'); rect(g, X + 2, Y + 18, 13, 3, '#9c6b4a'); rect(g, X, Y + 38, 16, 2, '#9c6b4a');
   rect(g, X + 13, Y + 21, 1, 5, '#d0504a'); rect(g, X + 12, Y + 26, 3, 3, '#d0504a');
+}
+
+// 시간이 지나도 모양이 그대로이고, 고양이가 그 뒤로 가려질 일도 없는 가구.
+// 패널은 이것들을 배경과 함께 그림 한 장(PNG)으로 미리 구워 두고, 매 프레임 다시 그리지 않는다.
+export const STATIC_TYPES = new Set(['plant', 'shelf', 'cabinet', 'table', 'globe', 'whiteboard', 'mtable', 'sofa', 'cattower', 'bench', 'console', 'aircon']);
+
+// 배경 + 고정 가구 (패널의 미리 구운 그림)
+export function paintStatic(g) {
+  paintBackground(g);
+  const noWorld = { isActive: () => false, serverBusy: false };
+  for (const f of [...FURNITURE].filter(f => STATIC_TYPES.has(f.type)).sort((a, b) => a.z - b.z)) drawFurniture(g, f, 0, noWorld);
 }
 
 // world.isActive(방): 그 방 담당이 일하는 중인가 / world.serverBusy: 서버실이 바쁜가

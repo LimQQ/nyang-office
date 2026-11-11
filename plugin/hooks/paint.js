@@ -1,9 +1,43 @@
 // 캔버스 대신 SVG 로 그리는 붓. sim.js 가 쓰는 만큼만(fillStyle · fillRect · globalAlpha · drawImage) 흉내 낸다.
 // Claude 앱 패널의 Svg 는 한 장에 131072 글자까지라, 같은 색 사각형을 한 path 로 묶어 짧게 쓴다.
 import * as O from './core/office.js';
+import { BG_PNG } from './core/bg-png.js';
 import * as S from './core/sprites.js';
 
 const r1 = v => Math.round(v * 10) / 10;
+
+// 스프라이트 한 장 → 자기 좌표의 SVG 조각. 같은 색 칸을 가로로 잇고, 바로 윗줄과 같은 띠면 세로로 늘려
+// 사각형 수를 줄인다. (rows 배열, look 객체)가 같으면 늘 같은 글자라 캐시해 둔다.
+const spriteCache = new WeakMap(); // rows → Map(look → svg)
+function spriteSvg(rows, look) {
+  let byLook = spriteCache.get(rows);
+  if (!byLook) spriteCache.set(rows, (byLook = new Map()));
+  const hit = byLook.get(look);
+  if (hit) return hit;
+  const rects = []; // [x, y, w, h, color]
+  let open = new Map(); // 'x,w,color' → 윗줄에서 이어 온 사각형
+  rows.forEach((row, y) => {
+    const next = new Map();
+    for (let x = 0; x < row.length;) {
+      let n = 1;
+      while (x + n < row.length && row[x + n] === row[x]) n++;
+      const col = S.colorOf(row[x], look);
+      if (col) {
+        const k = x + ',' + n + ',' + col;
+        const r = open.get(k);
+        if (r) { r[3]++; next.set(k, r); } else { const nr = [x, y, n, 1, col]; rects.push(nr); next.set(k, nr); }
+      }
+      x += n;
+    }
+    open = next;
+  });
+  const byColor = new Map();
+  for (const [x, y, w, h, col] of rects) byColor.set(col, (byColor.get(col) || '') + `M${x} ${y}h${w}v${h}h${-w}z`);
+  let out = '';
+  for (const [col, d] of byColor) out += `<path fill="${col}" d="${d}"/>`;
+  byLook.set(look, out);
+  return out;
+}
 
 export class Recorder {
   constructor() { this.ops = []; this.fillStyle = '#000'; this.globalAlpha = 1; }
@@ -11,32 +45,79 @@ export class Recorder {
     if (!(w > 0 && h > 0) || this.globalAlpha <= 0) return;
     this.ops.push([r1(x), r1(y), r1(w), r1(h), this.fillStyle, this.globalAlpha]);
   }
-  // sprites.js 가 넘겨 주는 { rows, look } (캔버스가 없을 때의 스프라이트)
+  // sprites.js 가 넘겨 주는 { rows, look } (캔버스가 없을 때의 스프라이트).
+  // 스프라이트는 자기 좌표(0~15 정수)로 한 번만 SVG 로 만들어 두고(spriteSvg, 캐시), translate 로 놓는다.
+  // 한 장의 79% 가 고양이 그림이라, 절대 좌표로 한 줄씩 쓰던 때보다 글자 수가 크게 준다.
   drawImage(img, x, y) {
     if (!img || !img.rows) return;
-    const byColor = new Map();
-    img.rows.forEach((row, yy) => {
-      for (let xx = 0; xx < row.length;) {
-        const col = S.colorOf(row[xx], img.look);
-        let n = 1;
-        while (xx + n < row.length && row[xx + n] === row[xx]) n++;
-        if (col) { if (!byColor.has(col)) byColor.set(col, []); byColor.get(col).push([xx, yy, n]); }
-        xx += n;
-      }
-    });
-    for (const [col, runs] of byColor) for (const [xx, yy, n] of runs) this.ops.push([r1(x + xx), r1(y + yy), n, 1, col, this.globalAlpha]);
+    this.ops.push({ raw: spriteSvg(img.rows, img.look), x: Math.round(x), y: Math.round(y), alpha: this.globalAlpha });
   }
-  // 이어진 같은 색·투명도 사각형은 path 하나로
-  svg() {
+  // 묶음(고양이 한 마리 · 비행기 하나): key, 기준점, 앞으로의 경로(future: [dx, dy] 목록, 없으면 null).
+  // svg() 가 <g> 로 감싸 움직임 애니메이션을 단다
+  beginItem(key, x, y, future = null) { this.ops.push({ begin: key, x, y, future }); }
+  endItem() { this.ops.push({ end: true }); }
+  // 걷는 다리: 보통(drawA)·발 내딛기(drawB) 두 장을 다 그리고, 앞으로 predictMs 동안 언제 바꿀지를
+  // SVG 애니메이션(visibility, 뚝뚝 끊어 바꾸는 discrete)으로 단다. phase = 지금까지 바꾼 횟수(소수), rate = 1초에 바꾸는 횟수
+  walkCycle(phase, rate, drawA, drawB) {
+    const D = this.predictMs || 0;
+    const stateAt0 = Math.floor(phase) % 2; // 0 = 보통, 1 = 발 내딛기
+    const times = [0];
+    for (let ms = (1 - (phase - Math.floor(phase))) / rate * 1000; ms < D; ms += 1000 / rate) times.push(ms);
+    const layer = (want, draw) => {
+      const vis = k => ((stateAt0 + k) % 2 === want ? 'visible' : 'hidden');
+      const anim = D > 0 && times.length > 1
+        ? `<animate attributeName="visibility" values="${times.map((_, k) => vis(k)).join(';')}" keyTimes="${times.map(ms => +(ms / D).toFixed(4)).join(";")}" dur="${D}ms" calcMode="discrete" fill="freeze"/>`
+        : '';
+      this.ops.push({ sub: vis(0), anim });
+      draw();
+      this.ops.push({ subEnd: true });
+    };
+    layer(0, drawA);
+    layer(1, drawB);
+  }
+  // 이 장면에 나온 묶음들 { key → {x, y, future} }
+  anchors() {
+    const out = new Map();
+    for (const op of this.ops) if (op.begin) out.set(op.begin, { x: op.x, y: op.y, future: op.future });
+    return out;
+  }
+  // 이어진 같은 색·투명도 사각형은 path 하나로. anim(key) 가 돌려준 애니메이션을 묶음 <g> 에 단다
+  svg(anim = () => '') {
     let out = '', cur = null, d = '';
-    const flush = () => { if (cur) out += `<path fill="${cur[0]}"${cur[1] < 1 ? ` fill-opacity="${r1(cur[1] * 100) / 100}"` : ''} d="${d}"/>`; };
-    for (const [x, y, w, h, fill, a] of this.ops) {
+    const flush = () => { if (cur) out += `<path fill="${cur[0]}"${cur[1] < 1 ? ` fill-opacity="${r1(cur[1] * 100) / 100}"` : ''} d="${d}"/>`; cur = null; d = ''; };
+    for (const op of this.ops) {
+      if (op.begin) { flush(); out += anim(op.begin) || '<g>'; continue; }
+      if (op.end) { flush(); out += '</g>'; continue; }
+      // 다리 한 장: 첫 모습(visibility)을 속성으로 두어, 앱이 애니메이션 없이 첫 순간을 그려도 맞는 다리가 보인다
+      if (op.sub) { flush(); out += `<g visibility="${op.sub}">${op.anim}`; continue; }
+      if (op.subEnd) { flush(); out += '</g>'; continue; }
+      // 미리 만들어 둔 스프라이트: 제자리로 옮겨 놓기만 한다
+      if (op.raw !== undefined) { flush(); out += `<g transform="translate(${op.x} ${op.y})"${op.alpha < 1 ? ` opacity="${r1(op.alpha * 100) / 100}"` : ''}>${op.raw}</g>`; continue; }
+      const [x, y, w, h, fill, a] = op;
       if (!cur || cur[0] !== fill || cur[1] !== a) { flush(); cur = [fill, a]; d = ''; }
       d += `M${x} ${y}h${w}v${h}h${-w}z`;
     }
     flush();
     return out;
   }
+}
+
+// ── 앞으로의 움직임 미리 그리기 ──
+// 앱은 1초에 5~8장만, 그것도 0.15~0.5초로 들쭉날쭉하게 그려 간다(재 봤다).
+// 그래서 장마다 "지금 위치에서 앞으로 predictMs 동안 갈 길"을 SVG 애니메이션(SMIL)으로 넣는다.
+// 걷는 길(path)과 속도를 알기 때문에 앞으로의 위치를 정확히 셀 수 있고, 앱은 그 길을 60fps 로 직접 그린다.
+// 다음 장이 언제 오든(predictMs 안이면) 화면 속 고양이는 이미 그 순간의 진짜 위치에 와 있어서 이음매가 없다.
+// 기본 모습(transform 없음)이 곧 지금 위치라, 앱이 첫 순간을 애니메이션 없이 그려도 튀지 않는다.
+function predictAnims(anchors, ms) {
+  const out = new Map();
+  if (!(ms > 0)) return out;
+  for (const [key, p] of anchors) {
+    const f = p.future;
+    if (!f || f.length < 2 || f.every(([dx, dy]) => Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05)) continue;
+    const values = f.map(([dx, dy]) => `${r1(dx)} ${r1(dy)}`).join(';');
+    out.set(key, `<g><animateTransform attributeName="transform" type="translate" values="${values}" dur="${ms}ms" calcMode="linear" fill="freeze"/>`);
+  }
+  return out;
 }
 
 // 배경(바닥·벽)은 변하지 않으니 픽셀로 한 번 굽고, 색마다 가장 큰 사각형들로 다시 쪼개 한 번만 만든다.
@@ -153,20 +234,33 @@ function boardSvg(todos) {
 const full = () => ({ x: 0, y: 0, w: O.PW, h: O.PH });
 const open = view => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${view.x} ${view.y} ${view.w} ${view.h}" width="${O.PW * 2}" height="${O.PH * 2}" shape-rendering="crispEdges">`;
 
-// 바닥·벽만 그린 아래층. 같은 view 면 늘 같은 글자라 패널이 다시 받지 않는다
+// 미리 구운 배경 PNG 가 있는 지도인가 (scripts/sync-plugin.js 가 만든다)
+const baked = () => !!BG_PNG[O.LAYOUT];
+
+// 아래층: 바닥·벽(+ 미리 구운 PNG 가 있으면 고정 가구까지). 같은 view 면 늘 같은 글자다
 export function backLayerSvg(view = full()) {
+  if (baked()) {
+    // 사각형 수천 개 대신 PNG 한 장 → 앱이 훨씬 가볍게 그린다. 도트가 번지지 않게 pixelated
+    return open(view) + `<image href="data:image/png;base64,${BG_PNG[O.LAYOUT]}" x="0" y="0" width="${O.PW}" height="${O.PH}" preserveAspectRatio="none" style="image-rendering:pixelated"/></svg>`;
+  }
   return open(view) + backgroundSvg() + '</svg>';
 }
 
 // 움직이는 것(가구 불빛·고양이·종이비행기·조명·말풍선)만 그린 위층. 배경이 비쳐 보이도록 투명하다
 // overlay: 맨 위에 덮을 SVG 조각(결정 컷인 등)
-export function frontLayerSvg(office, { todos = [], hour, view = full(), overlay = '' } = {}) {
+// predictMs: 앞으로 이만큼(ms)의 움직임을 미리 그린다. 다음 장이 그 안에 오면 이음매 없이 이어진다
+export function frontLayerSvg(office, { todos = [], hour, view = full(), overlay = '', predictMs = 0 } = {}) {
   const rec = new Recorder();
-  office.draw(rec, { hour });
+  rec.predictMs = predictMs; // 걷는 다리 바꿀 시각도 이만큼 앞까지 미리 넣는다
+  office.draw(rec, { hour, skipStatic: baked(), predictMs, predictSteps: Math.max(2, Math.round(predictMs / 100)) });
+  const anims = predictAnims(rec.anchors(), predictMs);
+  const anim = key => anims.get(key) || '';
   const cats = office.cats().filter(c => !c.gone);
-  const tags = cats.map(c => tagSvg(c, office.uiOf(c))).join('');
-  const bubbles = cats.map(c => { const u = office.uiOf(c); return u.bubble && u.alpha > 0.2 ? bubbleSvg(u.x, u.y, u.bubble) : ''; }).join('');
-  const body = rec.svg();
+  // 이름표·말풍선도 고양이와 같이 미끄러진다
+  const wrap = (c, s) => (s && anims.has('cat:' + c.id) ? `${anim('cat:' + c.id)}${s}</g>` : s);
+  const tags = cats.map(c => wrap(c, tagSvg(c, office.uiOf(c)))).join('');
+  const bubbles = cats.map(c => { const u = office.uiOf(c); return u.bubble && u.alpha > 0.2 ? wrap(c, bubbleSvg(u.x, u.y, u.bubble)) : ''; }).join('');
+  const body = rec.svg(anim);
   const build = ui => open(view) + body + `<g shape-rendering="auto">${staticLabels()}${boardSvg(todos)}${ui}${overlay}</g></svg>`;
   const svg = build(tags + bubbles);
   // Svg 한 장은 131072 글자까지. 넘칠 것 같으면 말풍선을 뺀다

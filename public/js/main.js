@@ -27,6 +27,7 @@ function loadStats() { try { return JSON.parse(localStorage.getItem(STATS_KEY));
 function saveStats(s) { try { localStorage.setItem(STATS_KEY, JSON.stringify(s)); } catch {} renderChamp(); }
 
 const office = createOffice({
+  human: false, // 집사는 두지 않는다: 팀장냥이 팀장실(예전 집사 자리)에 앉는다
   log: (c, text, kind) => log(c, text, kind),
   todos: items => setTodos(items),
   stats: loadStats(),

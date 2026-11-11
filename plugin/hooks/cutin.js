@@ -2,6 +2,8 @@
 // 번쩍 → 집중선 → 들쭉날쭉한 폭발 말풍선 위에 기울어진 큰 글씨 → 화면 흔들림 → 사라짐.
 // 지금 보이는 영역(view)에 맞춰 그리므로, 확대 중이든 아니든 패널을 꽉 채운다.
 
+import { colorOf } from './core/sprites.js';
+
 export const CUTIN_MS = 1900;
 
 const FONT = `font-family="Galmuri11,'Apple SD Gothic Neo','Malgun Gothic',sans-serif" font-weight="bold"`;
@@ -11,11 +13,10 @@ const clamp01 = v => Math.max(0, Math.min(1, v));
 // 살짝 넘쳤다가 돌아오는 튕김
 const backOut = q => { const c = 1.9; return 1 + (c + 1) * (q - 1) ** 3 + c * (q - 1) ** 2; };
 
-// 무엇이 정해졌는지 → 외칠 말과 색
+// 고양이들이 회의에서 무엇을 정했는지 → 외칠 말과 색 (sub 의 {name} 은 정한 고양이 이름)
 export const CUTIN_KINDS = {
-  answer: { text: '정했다냥!', sub: '집사님의 결정', burst: '#ffd23f', band: '#d0504a' },
-  plan:   { text: '계획 승인!', sub: '이대로 간다', burst: '#7fe3a0', band: '#2f6db5' },
-  branch: { text: '이걸로 간다냥!', sub: '브랜치 결정', burst: '#ffb347', band: '#8064a2' },
+  plan:   { text: '계획 확정!', sub: '{name}이 정했다냥', burst: '#ffd23f', band: '#2f6db5' },
+  urgent: { text: '다시 간다냥!', sub: '{name}의 긴급 결단', burst: '#ffb347', band: '#d0504a' },
 };
 
 // 화면 흔들림: 처음 0.45초 동안 지금 몇 px 밀렸는지
@@ -37,12 +38,41 @@ function burstPath(cx, cy, rx, ry, n, seed) {
   return d + 'Z';
 }
 
+// 결정한 이의 도트 초상: 16×16 스프라이트를 px 크기로 키워 액자에 넣는다
+function portraitSvg(who, X, Y, side, band) {
+  const px = side / 18;
+  let s = `<rect x="${r1(X)}" y="${r1(Y)}" width="${r1(side)}" height="${r1(side)}" fill="${band}" stroke="#0b0d14" stroke-width="${r1(px * 0.8)}"/>`;
+  s += `<rect x="${r1(X + px * 0.6)}" y="${r1(Y + px * 0.6)}" width="${r1(side - px * 1.2)}" height="${r1(side - px * 1.2)}" fill="none" stroke="#ffffff" stroke-opacity=".7" stroke-width="${r1(px * 0.4)}"/>`;
+  // 같은 색끼리 가로로 이어 path 하나씩
+  const byColor = new Map();
+  who.rows.forEach((row, yy) => {
+    for (let xx = 0; xx < row.length;) {
+      let n = 1;
+      while (xx + n < row.length && row[xx + n] === row[xx]) n++;
+      const col = colorOf(row[xx], who.look);
+      if (col) byColor.set(col, (byColor.get(col) || '') + `M${r1(X + (xx + 1) * px)} ${r1(Y + (yy + 1) * px)}h${r1(n * px)}v${r1(px)}h${r1(-n * px)}z`);
+      xx += n;
+    }
+  });
+  s += `<g shape-rendering="crispEdges">`;
+  for (const [col, d] of byColor) s += `<path fill="${col}" d="${d}"/>`;
+  s += `</g>`;
+  // 이름표
+  const fs = side * 0.13;
+  const label = esc(who.name);
+  s += `<rect x="${r1(X - px)}" y="${r1(Y + side - fs * 0.6)}" width="${r1(side + px * 2)}" height="${r1(fs * 1.5)}" fill="#0b0d14"/>`;
+  s += `<text x="${r1(X + side / 2)}" y="${r1(Y + side + fs * 0.55)}" font-size="${r1(fs)}" text-anchor="middle" ${FONT} fill="#ffffff">${label}</text>`;
+  return s;
+}
+
 // elapsed: 컷인이 시작되고 지난 ms, view: 지금 보이는 영역 { x, y, w, h }
-export function cutinSvg(kind, elapsed, view) {
-  const K = CUTIN_KINDS[kind] || CUTIN_KINDS.answer;
+// who: 결정한 이 { rows, look, name } (도트 초상으로 함께 뜬다, 없으면 생략)
+export function cutinSvg(kind, elapsed, view, who = null) {
+  const K = CUTIN_KINDS[kind] || CUTIN_KINDS.plan;
+  const subText = K.sub.replace("{name}", who ? who.name : "고양이들");
   if (elapsed < 0 || elapsed > CUTIN_MS) return '';
   const { x, y, w, h } = view;
-  const cx = x + w / 2, cy = y + h * 0.46;
+  const cx = x + w / 2, cy = y + h * (who ? 0.36 : 0.46); // 초상이 있으면 말풍선을 위로
   const fade = 1 - clamp01((elapsed - (CUTIN_MS - 350)) / 350); // 마지막 0.35초 동안 사라진다
   let s = `<g opacity="${r1(fade * 100) / 100}">`;
 
@@ -87,11 +117,21 @@ export function cutinSvg(kind, elapsed, view) {
     s += `<text x="${r1(cx)}" y="${r1(cy + size * 0.36)}" font-size="${r1(size)}" text-anchor="middle" ${FONT} fill="#ffffff">${text}</text>`;
     // 작은 부제
     const sub = size * 0.32;
-    s += `<text x="${r1(cx)}" y="${r1(cy + size * 0.36 + sub * 1.7)}" font-size="${r1(sub)}" text-anchor="middle" ${FONT} fill="#0b0d14">🐾 ${esc(K.sub)} 🐾</text>`;
+    s += `<text x="${r1(cx)}" y="${r1(cy + size * 0.36 + sub * 1.7)}" font-size="${r1(sub)}" text-anchor="middle" ${FONT} fill="#0b0d14">🐾 ${esc(subText)} 🐾</text>`;
     s += `</g>`;
   }
 
-  // 6) 맨 처음 번쩍 (흰 빛)
+  // 6) 결정한 이의 초상이 아래에서 쑥 올라온다
+  if (who && who.rows) {
+    const rise = backOut(clamp01((elapsed - 220) / 260));
+    if (rise > 0) {
+      const side = Math.min(w * 0.38, h * 0.3);
+      const X = cx - side / 2, Yend = y + h * 0.62, Y = Yend + (1 - rise) * h * 0.45;
+      s += portraitSvg(who, X, Y, side, K.band);
+    }
+  }
+
+  // 7) 맨 처음 번쩍 (흰 빛)
   const flash = 1 - clamp01(elapsed / 160);
   if (flash > 0) s += `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#ffffff" opacity="${r1(flash * 90) / 100}"/>`;
   return s + '</g>';

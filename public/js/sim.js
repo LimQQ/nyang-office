@@ -63,6 +63,9 @@ export function createOffice(hooks = {}) {
   const log = hooks.log || (() => {});
   const setTodos = hooks.todos || (() => {});
   const saveStats = hooks.saveStats || (() => {});
+  // human: false 면 집사를 사무실에 두지 않는다(패널). 집사 몫의 일(질문·계획 확인)은 팀장냥이 자기 자리에서 한다
+  const withHuman = hooks.human !== false;
+  const decided = hooks.decided || null; // ({ kind: 'plan' | 'urgent', by: 고양이 id }) 회의가 무언가를 정하고 끝났을 때
   const hourNow = hooks.hour || (() => { const d = new Date(); return d.getHours() + d.getMinutes() / 60; });
 
   // 모든 예약·말풍선·걷기는 이 시뮬레이션 시계를 따른다.
@@ -195,6 +198,29 @@ export function createOffice(hooks = {}) {
         this.alpha = Math.min(1, Math.max(0, this.alpha + this.fade * dt * 2.5));
         if (this.alpha === 0 || this.alpha === 1) this.fade = 0;
       }
+    }
+
+    // 앞으로 ms 동안 n 번 나눠 본 위치(지금 기준점에서 얼마나 떨어지는지 [dx, dy] 목록, 첫 칸은 [0, 0]).
+    // update() 와 같은 규칙(경로 모서리를 차례로 speed 로)으로 셈만 하고 고양이는 건드리지 않는다.
+    // 패널은 이걸 SVG 애니메이션으로 넣어, 다음 장이 언제 오든 고양이가 이미 제자리에 와 있게 한다.
+    future(ms, n) {
+      const out = [[0, 0]];
+      if (!this.path.length) return out;
+      const path = this.path.map(p => [p[0], p[1]]);
+      let x = this.x, y = this.y, arrived = false;
+      const step = (this.speed || SPEED) * (ms / 1000) / n;
+      const endOy = this.target ? this.target.oy || 0 : 0;
+      for (let k = 1; k <= n; k++) {
+        let budget = step;
+        while (budget > 0 && path.length) {
+          const [tx, ty] = path[0];
+          const dx = tx - x, dy = ty - y, d = Math.hypot(dx, dy);
+          if (d <= budget) { x = tx; y = ty; budget -= d; path.shift(); if (!path.length) arrived = true; }
+          else { x += (dx / d) * budget; y += (dy / d) * budget; budget = 0; }
+        }
+        out.push([x - this.x, y - this.y + (arrived ? endOy : 0)]); // 도착하면 자리의 높이 보정(oy)이 붙는다
+      }
+      return out;
     }
 
     say(kind, text, ms = 4000) { this.bubble = { kind, text, until: now() + ms }; }
@@ -400,7 +426,7 @@ export function createOffice(hooks = {}) {
     '...131...',
   ];
 
-  function drawLetters(g) {
+  function drawLetters(g, opts = {}) {
     for (const l of letters) {
       const p = Math.min(1, (now() - l.t0) / l.dur);
       const b = headOf(l.to);
@@ -411,13 +437,27 @@ export function createOffice(hooks = {}) {
         const sway = Math.sin(q * Math.PI * 4) * 2 * (1 - q);
         return [l.a[0] + (b[0] - l.a[0]) * e, l.a[1] + (b[1] - l.a[1]) * e - arc + sway];
       };
+      const [x, y] = at(p);
+      // 묶음 표시 + 앞으로의 비행 경로(predictMs 동안 n 번): 패널은 이걸 SVG 애니메이션으로 이어 그린다
+      // (캔버스엔 beginItem 이 없어 웹은 그냥 지나간다)
+      if (g.beginItem) {
+        let fut = null;
+        if (opts.predictMs) {
+          const n = opts.predictSteps || 6;
+          fut = [];
+          for (let k = 0; k <= n; k++) {
+            const [fx, fy] = at(Math.min(1, p + (k * opts.predictMs / n) / l.dur));
+            fut.push([fx - x, fy - y]);
+          }
+        }
+        g.beginItem('plane:' + l.t0 + ':' + l.to.id, x, y, fut);
+      }
       for (const k of [0.09, 0.06, 0.03]) { // 지나온 자리에 바람 점
         if (p - k <= 0) continue;
         const [tx, ty] = at(p - k);
         g.fillStyle = l.err ? 'rgba(208,80,74,.5)' : 'rgba(255,255,255,.6)';
         g.fillRect(Math.round(tx), Math.round(ty), 1, 1);
       }
-      const [x, y] = at(p);
       const X = Math.round(x) - 4, Y = Math.round(y) - 3;
       const ink = l.err ? '#a8322c' : '#3a3f50';
       const paper = l.err ? '#ffd6d1' : '#fffdf5';
@@ -430,6 +470,7 @@ export function createOffice(hooks = {}) {
           g.fillRect(l.dir > 0 ? X + dx : X + 8 - dx, Y + dy, 1, 1);
         }
       });
+      if (g.endItem) g.endItem();
     }
   }
 
@@ -443,7 +484,8 @@ export function createOffice(hooks = {}) {
 
   function delegate(from, ev) {
     const room = roomForTool(ev.tool);
-    if (room === 'home') { // 서브에이전트 부르기·메시지 보내기: 자기 자리에서 전화
+    // 서브에이전트 부르기·메시지 보내기: 자기 자리에서 전화. 집사가 없으면 집사에게 묻는 일도 자기 자리에서
+    if (room === 'home' || (room === 'boss' && !withHuman)) {
       from.phoneUntil = now() + 2600;
       from.say('speech', ev.label, 2200);
       log(from, ev.label);
@@ -602,6 +644,12 @@ export function createOffice(hooks = {}) {
     const m = meeting;
     meeting = null;
     if (m.kind !== 'tea') lastMeetingEnd = now();
+    // 계획·긴급 회의는 무언가를 정하고 끝난다: 누가 정했는지 알린다(패널의 결정 컷인)
+    if (m.kind === 'plan' || m.kind === 'urgent') {
+      const planner = residents.meeting;
+      const by = m.kind === 'plan' && m.people.has(planner) ? planner : claude || planner;
+      if (by && decided) { try { decided({ kind: m.kind, by: by.id }); } catch (e) {} }
+    }
     for (const p of m.people) {
       if (p === claude) {
         if (claude.room === 'meet') { claude.say('speech', '자, 각자 자리로! 🐾', 1500); sendTo(claude, 'home'); }
@@ -792,7 +840,7 @@ export function createOffice(hooks = {}) {
   const hearts = []; // { x, y, t0 }
 
   function pet(id) {
-    const c = [...everyone(), human].find(x => x.id === id);
+    const c = (withHuman ? [...everyone(), human] : [...everyone()]).find(x => x.id === id);
     if (!c) return null;
     bump(s => { s.pets++; });
     c.petUntil = now() + 2200;
@@ -865,11 +913,13 @@ export function createOffice(hooks = {}) {
         });
         return;
       case 'prompt':
-        human.say('speech', ev.text, 6000);
         log(human, '🗣️ ' + ev.text);
         wake(c);
         c.phase = 'work';
-        c.say('speech', '냥! 🐾', 1500);
+        if (withHuman) {
+          human.say('speech', ev.text, 6000);
+          c.say('speech', '냥! 🐾', 1500);
+        } else c.say('speech', '📨 ' + ev.text, 4000); // 집사가 없으면 팀장냥이 요청을 받아 읽는다
         // 새 요청이 오면 한가한 고양이들을 모아 킥오프 회의부터
         if (c !== claude || !callMeeting('kickoff')) sendTo(c, 'home');
         return;
@@ -1020,7 +1070,17 @@ export function createOffice(hooks = {}) {
     const m = snap.main || {};
     const busy = m.tool && m.status === 'work' && m.quietMs < IDLE_AFTER;
     if (m.quietMs < IDLE_AFTER) claude.lastAt = now() - m.quietMs;
-    else goIdle(claude, m.quietMs || 0);
+    else {
+      goIdle(claude, m.quietMs || 0);
+      // 이미 한참 쉬고 있었다면(낮잠 시간) 책상에서 상자로 뛰어가는 대신 처음부터 상자 속에서 자고 있다
+      let first = 'desk';
+      try { first = chooseIdleActivity((m.quietMs || 0) / 1000, { hour: Math.floor(hourNow()), agentsBusy: 0 }); } catch (e) {}
+      if (first === 'nap') {
+        claude.room = 'nap';
+        claude.place(takeSpot('nap', claude));
+        claude.idleAct = 'nap';
+      }
+    }
     // 방금까지 일하던 방은 잠깐 일하는 모습으로 시작한다
     const showWork = (tool, label) => {
       const r = residents[roomForTool(tool)];
@@ -1056,7 +1116,20 @@ export function createOffice(hooks = {}) {
     }
     const walking = c.path.length > 0;
     const jump = jumpOf(c);
-    const step = (walking && Math.floor(t * (c.speed > 120 ? 12 : 7)) % 2 === 1) || jump > 0; // 점프 중엔 다리를 뻗는다
+    const rate = c.speed > 120 ? 12 : 7; // 1초에 다리를 몇 번 바꾸나
+    // 패널: 걷는 동안엔 두 장(보통·발 내딛기)을 다 그리고, 바꿀 시각은 패널이 SVG 애니메이션으로 맡는다.
+    // (앱이 1초에 5~8장만 들쭉날쭉 그려 가서, 여기서 고르면 다리가 제멋대로 끊겨 보인다)
+    if (walking && !jump && g.walkCycle) {
+      g.walkCycle(t * rate, rate, () => drawCatFrame(g, c, t, false, walking, jump), () => drawCatFrame(g, c, t, true, walking, jump));
+      return;
+    }
+    const step = (walking && Math.floor(t * rate) % 2 === 1) || jump > 0; // 점프 중엔 다리를 뻗는다
+    drawCatFrame(g, c, t, step, walking, jump);
+  }
+
+  // 고양이 한 장: step 이면 발을 내딛은 모습(살짝 위로 1px)
+  function drawCatFrame(g, c, t, step, walking, jump) {
+    const tn = now();
     const chin = !walking && tn < c.chinUntil;
     const phone = !walking && tn < c.phoneUntil;
     const front = c.face !== 'up' || chin || phone;
@@ -1159,7 +1232,7 @@ export function createOffice(hooks = {}) {
     const lateNight = hour >= 1 && hour < 5;
     if (!lateNight || (claude && claude.phase === 'work')) glow(...O.GLOWS.home); // 팀장 책상
     for (const r of residentList) if (r.state === 'work' || !lateNight) glow(Math.round(r.desk.x * TILE) - 8, Math.round(r.desk.y * TILE) - 10, 32, 30);
-    if (!lateNight || human.jobs.size) glow(...O.GLOWS.human);
+    if (withHuman && (!lateNight || human.jobs.size)) glow(...O.GLOWS.human);
     // 서버실은 밤새 반짝인다
     g.fillStyle = 'rgba(94,240,138,.08)'; g.fillRect(...O.GLOWS.server);
   }
@@ -1169,8 +1242,9 @@ export function createOffice(hooks = {}) {
     const hour = opts.hour != null ? opts.hour : hourNow();
     drawWindows(g, hour, t);
     O.drawLift(g, lift.open);
-    const cats = [...everyone(), human];
-    const items = O.FURNITURE.map(f => ({ z: f.z, f }));
+    const cats = withHuman ? [...everyone(), human] : [...everyone()];
+    // skipStatic: 고정 가구는 미리 구운 배경 그림에 이미 있으니 건너뛴다(패널)
+    const items = O.FURNITURE.filter(f => !(opts.skipStatic && O.STATIC_TYPES.has(f.type))).map(f => ({ z: f.z, f }));
     for (const c of cats) items.push({ z: c.y + TILE, c });
     // 상자 속 고양이: 상자 앞면이 고양이 몸을 가린다
     if (surprise && surprise.kind === 'box') {
@@ -1182,10 +1256,15 @@ export function createOffice(hooks = {}) {
     for (const it of items) {
       if (it.f) O.drawFurniture(g, it.f, t, world);
       else if (it.box) O.drawFurniture(g, { type: it.box === 'back' ? 'boxBack' : 'boxFront', x: it.bx, y: it.by, w: 1, h: 1 }, t, world);
-      else drawCat(g, it.c, t);
+      else {
+        // 고양이 한 마리 = 묶음 하나 (기준점은 말풍선·이름표와 같은 uiOf 좌표)
+        if (g.beginItem) { const u = uiOf(it.c); g.beginItem('cat:' + it.c.id, u.x, u.y, opts.predictMs ? it.c.future(opts.predictMs, opts.predictSteps || 6) : null); }
+        drawCat(g, it.c, t);
+        if (g.endItem) g.endItem();
+      }
     }
     drawEffects(g, t);
-    drawLetters(g);
+    drawLetters(g, opts);
     if (opts.light !== false) drawLight(g, hour);
   }
 
@@ -1227,7 +1306,7 @@ export function createOffice(hooks = {}) {
     handle, reset, step, draw, uiOf, pet, champion, surpriseNow,
     get stats() { return stats; },
     get liftFloorShown() { return lift.open; },
-    cats: () => [...everyone(), human],
+    cats: () => (withHuman ? [...everyone(), human] : [...everyone()]),
     get surprise() { return surprise && { kind: surprise.kind, people: [...surprise.people].map(p => p.id) }; },
     get meeting() { return meeting && { kind: meeting.kind }; },
     letters: () => letters.length,
