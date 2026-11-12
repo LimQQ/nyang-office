@@ -331,13 +331,19 @@ function drawDesk(g, f, t, on) {
     rect(g, cx - 1, Y, 2, 2, '#b8bec6'); rect(g, cx - 3, Y + 2, 6, 1, '#b8bec6'); rect(g, cx - 8, Y - 2, 16, 2, '#cfd5dc');
     if (on) { // 화면에 코드가 흐른다
       const COL = ['#7fd88f', '#f2c94c', '#79b8ff', '#ff8f8f', '#c792ea'];
-      const s = Math.floor(t * 4);
-      for (let i = 0; i < 4; i++) { const k = s + i; rect(g, cx - 6 + (k % 3), Y - 10 + i * 2, 3 + Math.floor(hash(k, f.x) * 8), 1, COL[k % COL.length]); }
+      const lines = s => { for (let i = 0; i < 4; i++) { const k = s + i; rect(g, cx - 6 + (k % 3), Y - 10 + i * 2, 3 + Math.floor(hash(k % 6, f.x) * 8), 1, COL[k % COL.length]); } };
+      // 패널: 6장 순환을 앱이 직접 돌린다(다시 그리지 않아도 코드가 계속 흐른다)
+      if (g.loopFrames) g.loopFrames(t * 4, 6, 0.25, lines);
+      else lines(Math.floor(t * 4));
     }
   } else if (f.pc === 'globe') {
     rect(g, cx - 7, Y - 11, 14, 11, '#3a3f47'); rect(g, cx - 6, Y - 10, 12, 8, on ? '#2f6db5' : '#2a3a52');
     rect(g, cx - 1, Y, 2, 2, '#3a3f47'); rect(g, cx - 3, Y + 1, 6, 1, '#3a3f47');
-    if (on) { const sh = Math.floor(t * 3) % 6; rect(g, cx - 3, Y - 9, 6, 6, '#4f9be0'); rect(g, cx - 3 + (sh % 3), Y - 8, 2, 2, '#7cc47f'); rect(g, cx - 1 + ((sh + 2) % 3), Y - 6, 2, 2, '#7cc47f'); }
+    if (on) {
+      const globe = sh => { rect(g, cx - 3, Y - 9, 6, 6, '#4f9be0'); rect(g, cx - 3 + (sh % 3), Y - 8, 2, 2, '#7cc47f'); rect(g, cx - 1 + ((sh + 2) % 3), Y - 6, 2, 2, '#7cc47f'); };
+      if (g.loopFrames) g.loopFrames(t * 3, 6, 1 / 3, globe); // 패널: 도는 지구본도 앱이 직접
+      else globe(Math.floor(t * 3) % 6);
+    }
   }
   if (f.home) { // Claude 자리: 전화기·머그·명패
     rect(g, X + 3, Y + 1, 7, 4, '#d0504a'); rect(g, X + 4, Y, 5, 2, '#a83a35');
@@ -369,8 +375,11 @@ function drawRack(g, f, t, busy) {
     const uy = Y + 3 + u * 5;
     rect(g, X + 2, uy, Wd - 4, 4, '#3d4453'); rect(g, X + 3, uy + 1, 10, 1, '#4b5364');
     for (let l = 0; l < 3; l++) {
-      const on = (t * speed + hash(f.x, u, l) * 7) % 1 > 0.45;
-      rect(g, X + Wd - 5 - l * 3, uy + 1, 2, 2, on ? ['#5ef08a', '#3ec0ff', '#ffb347'][l] : '#28303b');
+      const phase = (t * speed + hash(f.x, u, l) * 7) % 1;
+      const col = ['#5ef08a', '#3ec0ff', '#ffb347'][l];
+      // 패널: 불빛 하나하나를 주기가 정해진 깜빡임으로 넘겨, 앱이 끝없이 직접 깜빡이게 한다
+      if (g.blinkLoop) g.blinkLoop(X + Wd - 5 - l * 3, uy + 1, 2, 2, col, '#28303b', 1 / speed, 0.45, phase);
+      else rect(g, X + Wd - 5 - l * 3, uy + 1, 2, 2, phase > 0.45 ? col : '#28303b');
     }
   }
 }

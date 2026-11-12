@@ -5,6 +5,7 @@ import { BG_PNG } from './core/bg-png.js';
 import * as S from './core/sprites.js';
 
 const r1 = v => Math.round(v * 10) / 10;
+const r3 = v => Math.round(v * 1000) / 1000;
 
 // 스프라이트 한 장 → 자기 좌표의 SVG 조각. 같은 색 칸을 가로로 잇고, 바로 윗줄과 같은 띠면 세로로 늘려
 // 사각형 수를 줄인다. (rows 배열, look 객체)가 같으면 늘 같은 글자라 캐시해 둔다.
@@ -56,24 +57,82 @@ export class Recorder {
   // svg() 가 <g> 로 감싸 움직임 애니메이션을 단다
   beginItem(key, x, y, future = null) { this.ops.push({ begin: key, x, y, future }); }
   endItem() { this.ops.push({ end: true }); }
-  // 걷는 다리: 보통(drawA)·발 내딛기(drawB) 두 장을 다 그리고, 앞으로 predictMs 동안 언제 바꿀지를
-  // SVG 애니메이션(visibility, 뚝뚝 끊어 바꾸는 discrete)으로 단다. phase = 지금까지 바꾼 횟수(소수), rate = 1초에 바꾸는 횟수
-  walkCycle(phase, rate, drawA, drawB) {
+  // ── 끝없이 되풀이되는 작은 움직임은 앱이 직접 돌리게(다시 그리지 않아도 계속 움직인다) ──
+  // loopFrames: n 장을 stepSec 마다 차례로 보여 주는 순환. pos = 지금 몇 번째 장인지(소수 = 그 장의 어디쯤)
+  loopFrames(pos, n, stepSec, draw) {
+    const dur = r3(n * stepSec), begin = -r3((((pos % n) + n) % n) * stepSec);
+    const cur = Math.floor(((pos % n) + n) % n);
+    for (let k = 0; k < n; k++) {
+      // discrete 는 keyTimes 가 없으면 값들을 똑같은 간격으로 나눠 보여 준다(글자 수 절약)
+      const values = Array.from({ length: n }, (_, j) => (j === k ? 'visible' : 'hidden')).join(';');
+      this.ops.push({ open: `<g visibility="${k === cur ? 'visible' : 'hidden'}"><animate attributeName="visibility" values="${values}" dur="${dur}s" begin="${begin}s" calcMode="discrete" repeatCount="indefinite"/>` });
+      draw(k);
+      this.ops.push({ close: true });
+    }
+  }
+  // blinkLoop: 깜빡이는 불 하나. 한 주기(periodSec)의 duty 까지는 꺼져 있다가 켜진다. phase = 지금 주기의 어디쯤(0~1).
+  // 불빛이 수십 개라 하나하나 애니메이션을 달면 무거워서, 시작 시점을 4칸으로 묶어 <defs> 에 한 번만 정의하고
+  // 각 불빛은 <use> 로 놓기만 한다.
+  blinkLoop(x, y, w, h, on, off, periodSec, duty, phase) {
+    const q = Math.round(phase * 4) % 4;
+    const key = `${on}|${off}|${r3(periodSec)}|${duty}|${q}|${w}|${h}`;
+    this.defs = this.defs || new Map();
+    let id = this.defs.get(key)?.id;
+    if (!id) {
+      id = 'b' + this.defs.size;
+      const p = q / 4;
+      this.defs.set(key, { id, svg: `<rect id="${id}" width="${w}" height="${h}" fill="${p > duty ? on : off}"><animate attributeName="fill" values="${off};${on}" keyTimes="0;${r3(duty)}" dur="${r3(periodSec)}s" begin="${-r3(p * periodSec)}s" calcMode="discrete" repeatCount="indefinite"/></rect>` });
+    }
+    this.ops.push({ svg: `<use href="#${id}" x="${r1(x)}" y="${r1(y)}"/>` });
+  }
+  // blinkLoop 이 모은 정의들 (장면 맨 앞에 둔다)
+  defsSvg() {
+    return this.defs && this.defs.size ? `<defs>${[...this.defs.values()].map(d => d.svg).join('')}</defs>` : '';
+  }
+  // 걷는 모습: 앞으로 predictMs 동안의 시간표를 SVG 애니메이션(뚝뚝 끊어 바꾸는 discrete)으로 단다.
+  //   · 몸통(위 15줄): 바라보는 방향마다 한 장, 그 방향일 때만 보인다(모퉁이에서 바뀜)
+  //   · 다리(맨 아랫줄): (방향 × 보통/발 내딛기) 마다 한 줄, 해당할 때만 보인다
+  //   · 발 내딛을 때 1px 위로 들썩임: 고양이 전체를 옮기는 애니메이션 하나
+  // 그래서 다리를 바꾸거나 모퉁이에서 방향을 틀어도 새 장을 보낼 필요가 없다.
+  //   phase = 지금까지 다리를 바꾼 횟수(소수), rate = 1초에 바꾸는 횟수, faces = [{ t: ms, face }] 방향이 바뀌는 시각
+  walkCycle(phase, rate, faces, drawBody, drawLegs) {
     const D = this.predictMs || 0;
-    const stateAt0 = Math.floor(phase) % 2; // 0 = 보통, 1 = 발 내딛기
-    const times = [0];
-    for (let ms = (1 - (phase - Math.floor(phase))) / rate * 1000; ms < D; ms += 1000 / rate) times.push(ms);
-    const layer = (want, draw) => {
-      const vis = k => ((stateAt0 + k) % 2 === want ? 'visible' : 'hidden');
-      const anim = D > 0 && times.length > 1
-        ? `<animate attributeName="visibility" values="${times.map((_, k) => vis(k)).join(';')}" keyTimes="${times.map(ms => +(ms / D).toFixed(4)).join(";")}" dur="${D}ms" calcMode="discrete" fill="freeze"/>`
-        : '';
-      this.ops.push({ sub: vis(0), anim });
-      draw();
-      this.ops.push({ subEnd: true });
-    };
-    layer(0, drawA);
-    layer(1, drawB);
+    const frac = phase - Math.floor(phase);
+    const step0 = Math.floor(phase) % 2; // 0 = 보통, 1 = 발 내딛기
+    const first = ((1 - frac) / rate) * 1000; // 첫 다리 바꾸기 시각
+    const stepCuts = [];
+    for (let ms = first; ms < D; ms += 1000 / rate) stepCuts.push(Math.round(ms));
+    const faceCuts = faces.filter(f => f.t > 0 && f.t < D).map(f => Math.round(f.t));
+    const stepAt = ms => (step0 + Math.max(0, Math.floor((ms + 1 - first) / (1000 / rate)) + 1)) % 2; // 반올림 1ms 여유
+    const faceAt = ms => { let f = faces[0].face; for (const x of faces) if (x.t <= ms + 1) f = x.face; return f; };
+    const kt = times => times.map(ms => +(ms / D).toFixed(3)).join(';');
+    const toggle = (times, on) => (D > 0 && times.length > 1
+      ? `<animate attributeName="opacity" values="${times.map(ms => (on(ms) ? 1 : 0)).join(';')}" keyTimes="${kt(times)}" dur="${D}ms" calcMode="discrete" fill="freeze"/>`
+      : '');
+    // 들썩임
+    const all = [...new Set([0, ...stepCuts, ...faceCuts])].sort((a, b) => a - b);
+    const sTimes = [0, ...stepCuts];
+    const bob = ms => (stepAt(ms) ? -1 : 0);
+    const bobAnim = D > 0 && sTimes.length > 1
+      ? `<animateTransform attributeName="transform" type="translate" values="${sTimes.map(ms => `0 ${bob(ms)}`).join(';')}" keyTimes="${kt(sTimes)}" dur="${D}ms" calcMode="discrete" fill="freeze"/>`
+      : '';
+    this.ops.push({ open: `<g transform="translate(0 ${bob(0)})">${bobAnim}` });
+    // 몸통: 방향마다
+    const fTimes = [0, ...faceCuts];
+    for (const face of [...new Set(fTimes.map(faceAt))]) {
+      this.ops.push({ open: `<g opacity="${faceAt(0) === face ? 1 : 0}">${toggle(fTimes, ms => faceAt(ms) === face)}` });
+      drawBody(face);
+      this.ops.push({ close: true });
+    }
+    // 다리: 방향 × 발
+    for (const combo of [...new Set(all.map(ms => faceAt(ms) + ':' + stepAt(ms)))]) {
+      const [face, st] = combo.split(':');
+      const on = ms => faceAt(ms) === face && String(stepAt(ms)) === st;
+      this.ops.push({ open: `<g opacity="${on(0) ? 1 : 0}">${toggle(all, on)}` });
+      drawLegs(face, st === '1');
+      this.ops.push({ close: true });
+    }
+    this.ops.push({ close: true });
   }
   // 이 장면에 나온 묶음들 { key → {x, y, future} }
   anchors() {
@@ -91,6 +150,10 @@ export class Recorder {
       // 다리 한 장: 첫 모습(visibility)을 속성으로 두어, 앱이 애니메이션 없이 첫 순간을 그려도 맞는 다리가 보인다
       if (op.sub) { flush(); out += `<g visibility="${op.sub}">${op.anim}`; continue; }
       if (op.subEnd) { flush(); out += '</g>'; continue; }
+      // 되풀이 움직임(loopFrames·blinkLoop)
+      if (op.open) { flush(); out += op.open; continue; }
+      if (op.close) { flush(); out += '</g>'; continue; }
+      if (op.svg) { flush(); out += op.svg; continue; }
       // 미리 만들어 둔 스프라이트: 제자리로 옮겨 놓기만 한다
       if (op.raw !== undefined) { flush(); out += `<g transform="translate(${op.x} ${op.y})"${op.alpha < 1 ? ` opacity="${r1(op.alpha * 100) / 100}"` : ''}>${op.raw}</g>`; continue; }
       const [x, y, w, h, fill, a] = op;
@@ -249,7 +312,7 @@ export function backLayerSvg(view = full()) {
 // 움직이는 것(가구 불빛·고양이·종이비행기·조명·말풍선)만 그린 위층. 배경이 비쳐 보이도록 투명하다
 // overlay: 맨 위에 덮을 SVG 조각(결정 컷인 등)
 // predictMs: 앞으로 이만큼(ms)의 움직임을 미리 그린다. 다음 장이 그 안에 오면 이음매 없이 이어진다
-export function frontLayerSvg(office, { todos = [], hour, view = full(), overlay = '', predictMs = 0 } = {}) {
+export function frontLayerSvg(office, { todos = [], hour, view = full(), overlay = '', rootOverlay = '', predictMs = 0 } = {}) {
   const rec = new Recorder();
   rec.predictMs = predictMs; // 걷는 다리 바꿀 시각도 이만큼 앞까지 미리 넣는다
   office.draw(rec, { hour, skipStatic: baked(), predictMs, predictSteps: Math.max(2, Math.round(predictMs / 100)) });
@@ -261,7 +324,8 @@ export function frontLayerSvg(office, { todos = [], hour, view = full(), overlay
   const tags = cats.map(c => wrap(c, tagSvg(c, office.uiOf(c)))).join('');
   const bubbles = cats.map(c => { const u = office.uiOf(c); return u.bubble && u.alpha > 0.2 ? wrap(c, bubbleSvg(u.x, u.y, u.bubble)) : ''; }).join('');
   const body = rec.svg(anim);
-  const build = ui => open(view) + body + `<g shape-rendering="auto">${staticLabels()}${boardSvg(todos)}${ui}${overlay}</g></svg>`;
+  const defs = rec.defsSvg(); // 서버 불빛 정의(<use> 가 가리킨다), svg() 다음에 모아야 다 들어 있다
+  const build = ui => open(view) + defs + body + `<g shape-rendering="auto">${staticLabels()}${boardSvg(todos)}${ui}${overlay}</g>${rootOverlay}</svg>`; // rootOverlay: <svg> 바로 아래 애니메이션(컷인 화면 흔들림)
   const svg = build(tags + bubbles);
   // Svg 한 장은 131072 글자까지. 넘칠 것 같으면 말풍선을 뺀다
   return svg.length > 128000 ? build(tags) : svg;

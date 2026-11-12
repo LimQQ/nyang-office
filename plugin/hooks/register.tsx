@@ -6,7 +6,7 @@ import type { Register } from 'claude-code'
 import * as O from './core/office.js'
 import { createOffice, lightOf } from './core/sim.js'
 import * as S from './core/sprites.js'
-import { CUTIN_MS, cutinSvg, shakeOf } from './cutin.js'
+import { CUTIN_MS, cutinSvg } from './cutin.js'
 import { backLayerSvg, frontLayerSvg } from './paint.js'
 import { rowEvents } from './rows.js'
 
@@ -33,22 +33,14 @@ const agentInfo = new Map<string, { type: string; desc: string }>()
 
 // ── 화면 ──
 // 패널은 늘 사무실 전체를 보여 준다. (예전엔 회의·깜짝 사건 때 잠깐 확대했는데, 확대 중엔 장을 자주
-// 새로 그려야 해서 렉이 심해 뺐다.) 결정 컷인 때만 화면이 잠깐 흔들린다.
+// 새로 그려야 해서 렉이 심해 뺐다.) 결정 컷인 때의 화면 흔들림은 컷인 애니메이션이 맡는다(cutin.js).
 type View = { x: number; y: number; w: number; h: number }
 let cutin: { kind: string; by: string; at: number } | null = null
 let frame = { back: '', front: '', head: '', sig: '' }
 let paintedAt = 0
-const PREDICT_MS = 1200 // 장마다 미리 그려 넣는 앞으로의 움직임 길이 (다시 그리는 간격이 최대 0.7초까지 벌어져서 넉넉히)
+const PREDICT_MS = 2000 // 장마다 미리 그려 넣는 앞으로의 움직임 길이(걷는 길이 바뀌면 어차피 새로 그리니 길게 잡아도 정확하다)
 
-function viewNow(): View {
-  let x = 0, y = 0
-  if (cutin) {
-    const [sx, sy] = shakeOf(Date.now() - cutin.at)
-    x += Math.round(sx)
-    y += Math.round(sy)
-  }
-  return { x, y, w: O.PW, h: O.PH }
-}
+const viewNow = (): View => ({ x: 0, y: 0, w: O.PW, h: O.PH })
 
 // ── 결정 컷인 ──
 // 고양이들이 회의에서 무언가를 정하고 끝냈을 때(sim 의 decided 알림) 정한 고양이 초상과 함께 크게 띄운다.
@@ -105,7 +97,9 @@ function meterRender() {
 
 // 새 그림을 만들고, 지난번과 다르면 true
 // ── 언제 다시 그릴까 ──
-const REFRESH_MS = 650 // 미리 그린 0.8초(PREDICT_MS)가 끝나기 전에 한 장
+const REFRESH_MS = 1300 // 걷거나 날고 있는 게 있을 때: 미리 그린 2초(PREDICT_MS)가 끝나기 전에 한 장(앱이 늦게 그려 가도 넉넉히)
+const IDLE_REFRESH_MS = 15000 // 다들 가만히 있을 때: 반복 움직임은 앱이 돌리니 아주 가끔만(시계·하늘 등)
+const MIN_GAP_MS = 250 // 변화가 몰려도 다시 그리기는 이 간격보다 자주 하지 않는다
 let lastSig = ''
 let lastAsk = 0
 
@@ -118,7 +112,8 @@ function sceneSig(o: Office): string {
     .map((c: any) => {
       const t = c.target
       const bubble = o.uiOf(c).bubble?.text ?? '' // 실제로 보이는 말풍선(시간 지나 사라진 건 빠진다)
-      return [c.id, t ? `${t.x},${t.y}` : '', c.path.length ? 'w' : 's', c.face, c.pose, bubble, c.label, Math.round(c.alpha * 4), c.jobs ? c.jobs.size : 0].join(':')
+      // 걷는 중엔 방향(face)을 빼둔다: 모퉁이에서 도는 모습도 미리 그려 넣었으니까
+      return [c.id, t ? `${t.x},${t.y}` : '', c.path.length ? 'w' : 's', c.path.length ? '' : c.face, c.pose, bubble, c.label, Math.round(c.alpha * 4), c.jobs ? c.jobs.size : 0].join(':')
     })
     .join('|')
   return [cats, o.letters(), o.meeting?.kind ?? '', o.surprise?.kind ?? '', todos.length, logs[0]?.text ?? '', SKY_LINE(o)].join('#')
@@ -128,11 +123,11 @@ function paint(o: Office): boolean {
   const p0 = Date.now()
   const view = viewNow()
   if (cutin && Date.now() - cutin.at > CUTIN_MS) cutin = null
-  const overlay = cutin ? cutinSvg(cutin.kind, Date.now() - cutin.at, view, deciderOf(o, cutin.by)) : ''
+  // 컷인은 애니메이션 한 벌이라, 도중에 다시 그려도 지난 시간만큼 앞당겨 이어진다
+  const c = cutin ? cutinSvg(cutin.kind, Date.now() - cutin.at, view, deciderOf(o, cutin.by)) : { svg: '', root: '' }
   const back = backLayerSvg(view)
-  // predictMs: 장마다 앞으로 이만큼의 움직임(걷는 길·비행 경로)을 미리 그려 넣는다(paint.js 의 predictAnims).
-  // 재 보니 앱이 그려 가는 간격이 0.15~0.56초로 들쭉날쭉해서, 가장 긴 간격보다 넉넉하게 0.8초.
-  const front = frontLayerSvg(o, { todos, hour: hourNow(), view, overlay, predictMs: PREDICT_MS } as any)
+  // predictMs: 장마다 앞으로 이만큼의 움직임(걷는 길·비행 경로·다리)을 미리 그려 넣는다(paint.js 의 predictAnims)
+  const front = frontLayerSvg(o, { todos, hour: hourNow(), view, overlay: c.svg, rootOverlay: c.root, predictMs: PREDICT_MS } as any)
   const head = SKY_LINE(o)
   const sig = logs.length + '|' + (logs[0]?.at ?? '') + (logs[0]?.text ?? '')
   const changed = back !== frame.back || front !== frame.front || head !== frame.head || sig !== frame.sig
@@ -210,12 +205,15 @@ export const register: Register = on => {
       if (DEBUG_METER && meterTick()) void $.fs.write(`${$.plugin.root}/.meter.log`, meterLog.join('\n') + '\n').catch(() => {})
       // 그림은 여기서 만들지 않는다: 앱이 그려 갈 때(render) 만든다(화면에 나간 장 기준으로 애니메이션을 이으려고).
       // 그리고 앱이 새 그림으로 바꿔 끼울 때마다 패널 전체가 잠깐 멈칫하므로, 꼭 필요할 때만 다시 그려 달라고 한다:
-      //  · 장마다 0.8초 앞까지의 걷기·비행·다리 움직임이 들어 있으니, 그걸로 못 덮는 변화가 생겼을 때
-      //  · 아무 변화가 없어도 미리 그린 0.8초가 끝나기 전에(0.65초마다)
-      //  · 결정 컷인처럼 코드로 한 장씩 계산하는 연출 중일 때
-      const sig = sceneSig(office)
-      const busyFx = !!cutin
-      if (busyFx || sig !== lastSig || t - lastAsk >= REFRESH_MS) {
+      //  · 장마다 2초 앞까지의 걷기·비행·다리 움직임과, 끝없이 도는 작은 움직임(서버 불빛·모니터·앞발),
+      //    결정 컷인 전체가 애니메이션으로 들어 있으니, 그걸로 못 덮는 변화가 생겼을 때(컷인은 시작·끝날 때)
+      //  · 걷거나 날고 있는 게 있으면 미리 그린 2초가 끝나기 전에(1.3초마다), 다들 가만히 있으면 15초마다
+      //  · 변화가 몰려도 0.25초에 한 번까지만
+      if (cutin && t - cutin.at > CUTIN_MS) cutin = null // 끝난 컷인은 빼고 한 장 다시
+      const sig = sceneSig(office) + '#' + (cutin ? cutin.at : '')
+      const moving = office.letters() > 0 || office.cats().some((c: any) => !c.gone && c.path.length)
+      const due = t - lastAsk >= (moving ? REFRESH_MS : IDLE_REFRESH_MS)
+      if ((sig !== lastSig && t - lastAsk >= MIN_GAP_MS) || due) {
         lastSig = sig
         lastAsk = t
         $.ui.invalidate('ui.render')

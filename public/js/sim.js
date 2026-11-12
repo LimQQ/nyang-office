@@ -223,6 +223,30 @@ export function createOffice(hooks = {}) {
       return out;
     }
 
+    // 앞으로 ms 동안 바라보는 방향이 언제 바뀌는지 [{ t: ms, face }] (첫 칸은 지금 방향).
+    // update() 처럼 다음 모서리 쪽을 본다. 패널은 이걸로 모퉁이에서 도는 모습까지 미리 그려 넣는다.
+    futureFaces(ms) {
+      const out = [{ t: 0, face: this.face }];
+      if (!this.path.length) return out;
+      const path = this.path.map(p => [p[0], p[1]]);
+      let x = this.x, y = this.y, face = this.face;
+      const dt = 20, step = (this.speed || SPEED) * (dt / 1000);
+      for (let t = dt; t <= ms && path.length; t += dt) {
+        let budget = step;
+        while (budget > 0 && path.length) {
+          const [tx, ty] = path[0];
+          const dx = tx - x, dy = ty - y, d = Math.hypot(dx, dy);
+          if (d > 0.5) {
+            const f = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down');
+            if (f !== face) { face = f; out.push({ t, face }); }
+          }
+          if (d <= budget) { x = tx; y = ty; budget -= d; path.shift(); }
+          else { x += (dx / d) * budget; y += (dy / d) * budget; budget = 0; }
+        }
+      }
+      return out;
+    }
+
     say(kind, text, ms = 4000) { this.bubble = { kind, text, until: now() + ms }; }
 
     remove() { release(this); this.gone = true; }
@@ -1120,19 +1144,52 @@ export function createOffice(hooks = {}) {
     // 패널: 걷는 동안엔 두 장(보통·발 내딛기)을 다 그리고, 바꿀 시각은 패널이 SVG 애니메이션으로 맡는다.
     // (앱이 1초에 5~8장만 들쭉날쭉 그려 가서, 여기서 고르면 다리가 제멋대로 끊겨 보인다)
     if (walking && !jump && g.walkCycle) {
-      g.walkCycle(t * rate, rate, () => drawCatFrame(g, c, t, false, walking, jump), () => drawCatFrame(g, c, t, true, walking, jump));
+      // 모퉁이에서 방향이 바뀌는 시각도 함께 넘겨, 방향별 몸통 · (방향 × 발) 다리 줄을 시간표대로 바꿔 보여 주게 한다.
+      // 보통/발 내딛기는 맨 아랫줄(다리)과 1px 들썩임만 달라서, 몸통은 방향마다 한 장만 그린다(장면이 가벼워진다)
+      g.walkCycle(t * rate, rate, c.futureFaces(g.predictMs || 0), face => drawWalkBody(g, c, face), (face, step) => drawWalkLegs(g, c, face, step));
       return;
     }
     const step = (walking && Math.floor(t * rate) % 2 === 1) || jump > 0; // 점프 중엔 다리를 뻗는다
     drawCatFrame(g, c, t, step, walking, jump);
   }
 
+  // ── 패널의 걷는 고양이: 몸통(위 15줄)과 다리(맨 아랫줄)를 따로 ──
+  // 같은 배열을 넘겨야 그림 캐시가 맞으니, 원본 스프라이트마다 잘라 둔 조각을 기억한다
+  const partCache = new WeakMap();
+  const partOf = rows => {
+    let p = partCache.get(rows);
+    if (!p) partCache.set(rows, (p = { body: rows.slice(0, 15), legs: [rows[15]] }));
+    return p;
+  };
+  const walkRows = (face, step) => face === 'up'
+    ? (step ? S.CAT_BACK_STEP : S.CAT_BACK)
+    : step ? S.CAT_FRONT_STEP : face === 'left' ? S.CAT_FRONT_LEFT : face === 'right' ? S.CAT_FRONT_RIGHT : S.CAT_FRONT;
+
+  function drawWalkBody(g, c, face) {
+    const front = face !== 'up';
+    const X = Math.round(c.x), Y = Math.round(c.y);
+    g.globalAlpha = c.alpha;
+    g.drawImage(S.sprite(partOf(walkRows(face, false)).body, c.look), X, Y);
+    if (c.look.hat) S.stamp(g, S.OV.hat, c.look, X, Y);
+    if (c.look.glasses && front) S.stamp(g, S.OV.glasses, c.look, X, Y);
+    if (now() < c.sweatUntil) S.stamp(g, S.OV.sweat, c.look, X, Y);
+    const champ = champion();
+    if (champ && champ.id === c.id) { px(g, CROWN, X + 6, Y - 3, '#f2c94c'); g.fillStyle = '#d0504a'; g.fillRect(X + 8, Y - 2, 1, 1); }
+    g.globalAlpha = 1;
+  }
+
+  function drawWalkLegs(g, c, face, step) {
+    g.globalAlpha = c.alpha;
+    g.drawImage(S.sprite(partOf(walkRows(face, step)).legs, c.look), Math.round(c.x), Math.round(c.y) + 15);
+    g.globalAlpha = 1;
+  }
+
   // 고양이 한 장: step 이면 발을 내딛은 모습(살짝 위로 1px)
-  function drawCatFrame(g, c, t, step, walking, jump) {
+  function drawCatFrame(g, c, t, step, walking, jump, face = c.face) {
     const tn = now();
     const chin = !walking && tn < c.chinUntil;
     const phone = !walking && tn < c.phoneUntil;
-    const front = c.face !== 'up' || chin || phone;
+    const front = face !== 'up' || chin || phone;
     if (tn > c.nextBlink + 140) c.nextBlink = tn + 2500 + Math.random() * 3500;
     const blink = tn > c.nextBlink || (tn < c.petUntil && !walking); // 쓰다듬으면 눈을 지그시 감는다
     const sleeping = !walking && c.pose === 'sleep';
@@ -1141,24 +1198,29 @@ export function createOffice(hooks = {}) {
     else if (!front) rows = step ? S.CAT_BACK_STEP : S.CAT_BACK;
     else if (step) rows = S.CAT_FRONT_STEP;
     else if (blink) rows = S.CAT_FRONT_BLINK;
-    else rows = c.face === 'left' ? S.CAT_FRONT_LEFT : c.face === 'right' ? S.CAT_FRONT_RIGHT : S.CAT_FRONT;
+    else rows = face === 'left' ? S.CAT_FRONT_LEFT : face === 'right' ? S.CAT_FRONT_RIGHT : S.CAT_FRONT;
     const X = Math.round(c.x), Y = Math.round(c.y + (walking ? 0 : c.oy) - jump) - (step && !jump ? 1 : 0);
     g.globalAlpha = c.alpha;
     g.drawImage(S.sprite(rows, c.look), X, Y);
     if (c.look.hat && !sleeping) S.stamp(g, S.OV.hat, c.look, X, Y);
     if (c.look.glasses && front && !sleeping) S.stamp(g, S.OV.glasses, c.look, X, Y);
+    // 1초에 rate 번 A·B 를 번갈아 덧그리는 동작. 패널은 앱이 직접 번갈아 보여 준다(loopFrames)
+    const toggle = (rate, A, B) => {
+      if (g.loopFrames) g.loopFrames(t * rate, 2, 1 / rate, k => S.stamp(g, k ? A : B, c.look, X, Y));
+      else S.stamp(g, Math.floor(t * rate) % 2 ? A : B, c.look, X, Y);
+    };
     if (!walking) {
       if (phone) S.stamp(g, S.OV.phone, c.look, X, Y);
       else if (chin) S.stamp(g, S.OV.chin, c.look, X, Y);
       else if (c.pose === 'read' && front) {
         S.stamp(g, S.OV.book, c.look, X, Y);
-        S.stamp(g, Math.floor(t * 1.5) % 2 ? S.OV.bookLineA : S.OV.bookLineB, c.look, X, Y);
+        toggle(1.5, S.OV.bookLineA, S.OV.bookLineB);
       } else if (!front && (c.pose === 'type' || c.pose === 'write')) {
-        S.stamp(g, Math.floor(t * 6) % 2 ? S.OV.pawsUpA : S.OV.pawsUpB, c.look, X, Y);
+        toggle(6, S.OV.pawsUpA, S.OV.pawsUpB);
       } else if (!front && c.pose === 'rack') {
-        S.stamp(g, Math.floor(t * 2) % 2 ? S.OV.pawsUpA : S.OV.pawsUpB, c.look, X, Y);
+        toggle(2, S.OV.pawsUpA, S.OV.pawsUpB);
       } else if (c.pose === 'groom' && front) {
-        S.stamp(g, Math.floor(t * 3) % 2 ? S.OV.groomA : S.OV.groomB, c.look, X, Y);
+        toggle(3, S.OV.groomA, S.OV.groomB);
       }
     }
     if (tn < c.sweatUntil && !sleeping) S.stamp(g, S.OV.sweat, c.look, X, Y);
