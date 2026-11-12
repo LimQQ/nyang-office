@@ -7,7 +7,6 @@ import * as O from './core/office.js'
 import { createOffice, lightOf } from './core/sim.js'
 import * as S from './core/sprites.js'
 import { CUTIN_MS, cutinSvg, shakeOf } from './cutin.js'
-import { chooseFocus } from './focus.js'
 import { backLayerSvg, frontLayerSvg } from './paint.js'
 import { rowEvents } from './rows.js'
 
@@ -33,109 +32,22 @@ const spawned = new Set<string>()
 const agentInfo = new Map<string, { type: string; desc: string }>()
 
 // ── 화면 ──
-// 그림은 두 장을 겹친다: 바닥·벽(거의 안 바뀜) 위에 움직이는 것만 그린 투명한 한 장.
-// 매 틱마다 그림을 미리 만들어 두고, 바뀐 게 있을 때만 패널에 다시 그려 달라고 한다.
+// 패널은 늘 사무실 전체를 보여 준다. (예전엔 회의·깜짝 사건 때 잠깐 확대했는데, 확대 중엔 장을 자주
+// 새로 그려야 해서 렉이 심해 뺐다.) 결정 컷인 때만 화면이 잠깐 흔들린다.
 type View = { x: number; y: number; w: number; h: number }
-type Reason = 'meeting' | 'surprise' | 'decision'
-const ZOOM = 2 // 확대 배율
-const ZOOM_HOLD_MS = 5000 // 한 번 확대하면 이만큼 보여 준다
-const ZOOM_COOLDOWN_MS = 25000 // 확대는 가끔씩만: 끝나고 이만큼은 다시 확대하지 않는다
-let zoomAmt = 0 // 0(전체) ~ 1(확대), 부드럽게 오간다
-let zoom: { reason: Reason; until: number } | null = null
-let zoomReadyAt = 0
-let cam = { x: 0, y: 0 } // 확대할 때 비출 곳 (부드럽게 따라간다)
-let focusPrev: { x: number; y: number } | null = null
 let cutin: { kind: string; by: string; at: number } | null = null
-let lastMeeting: string | null = null
-let lastSurprise: string | null = null
 let frame = { back: '', front: '', head: '', sig: '' }
 let paintedAt = 0
 const PREDICT_MS = 1200 // 장마다 미리 그려 넣는 앞으로의 움직임 길이 (다시 그리는 간격이 최대 0.7초까지 벌어져서 넉넉히)
 
-const roomCenters = () =>
-  Object.fromEntries(
-    Object.entries(O.ROOMS).map(([k, r]: [string, any]) => [
-      k,
-      { x: ((r.x0 + r.x1 + 1) / 2) * O.TILE, y: ((r.y0 + r.y1 + 1) / 2) * O.TILE },
-    ]),
-  )
-
-// 잠깐 확대해서 보여 줄 일이 생겼다 (가끔씩만)
-function zoomFor(reason: Reason, force = false) {
-  const t = Date.now()
-  if (!force && (zoom || t < zoomReadyAt)) return
-  zoom = { reason, until: t + ZOOM_HOLD_MS }
-  zoomReadyAt = t + ZOOM_HOLD_MS + ZOOM_COOLDOWN_MS
-  focusPrev = null
-}
-
-// 회의·깜짝 사건이 새로 시작되면 확대한다
-function watchMoments(o: Office) {
-  const m = o.meeting?.kind ?? null
-  // 킥오프(요청마다)·티타임은 너무 잦으니 확대하지 않는다: 계획 회의와 긴급 회의만
-  if (m && m !== lastMeeting && (m === 'plan' || m === 'urgent')) zoomFor('meeting')
-  lastMeeting = m
-  const s = o.surprise?.kind ?? null
-  if (s && s !== lastSurprise) zoomFor('surprise')
-  lastSurprise = s
-  if (zoom && Date.now() > zoom.until) zoom = null
-}
-
-function focusPoint(o: Office): { x: number; y: number } {
-  const cats = o
-    .cats()
-    .filter((c: any) => !c.gone)
-    .map((c: any) => {
-      const u = o.uiOf(c)
-      return {
-        id: c.id,
-        name: c.name,
-        x: u.x,
-        y: u.y + 6,
-        state: c.state,
-        working: !!(c.jobs && c.jobs.size),
-        sleeping: !c.path?.length && c.pose === 'sleep',
-      }
-    })
-  let want: { x: number; y: number } | null = null
-  try {
-    want = chooseFocus({
-      reason: zoom?.reason ?? null,
-      cats,
-      planes: o.planes(),
-      meeting: o.meeting?.kind ?? null,
-      surprise: o.surprise,
-      rooms: roomCenters(),
-      prev: focusPrev,
-    })
-  } catch {}
-  if (want && Number.isFinite(want.x) && Number.isFinite(want.y)) focusPrev = want
-  return focusPrev ?? { x: O.PW / 2, y: O.PH / 2 }
-}
-
-function viewNow(o: Office): View {
-  // 확대 정도를 목표(0 또는 1) 쪽으로 20%씩 옮긴다 → 스르륵 들어갔다 나온다
-  zoomAmt += ((zoom ? 1 : 0) - zoomAmt) * 0.2
-  if (Math.abs(zoomAmt) < 0.01) zoomAmt = 0
-  if (zoomAmt > 0) {
-    const f = focusPoint(o)
-    if (!cam.x && !cam.y) cam = { ...f }
-    cam = { x: cam.x + (f.x - cam.x) * 0.15, y: cam.y + (f.y - cam.y) * 0.15 }
-  } else cam = { x: 0, y: 0 }
-  const scale = 1 + zoomAmt * (ZOOM - 1)
-  const w = Math.round(O.PW / scale), h = Math.round(O.PH / scale)
-  // 전체일 땐 가운데, 확대할수록 카메라 쪽으로
-  const cx = O.PW / 2 + ((cam.x || O.PW / 2) - O.PW / 2) * zoomAmt
-  const cy = O.PH / 2 + ((cam.y || O.PH / 2) - O.PH / 2) * zoomAmt
-  // 정수 px 로 맞춰야 배경 그림이 덜 자주 바뀐다
-  let x = Math.round(Math.max(0, Math.min(O.PW - w, cx - w / 2)))
-  let y = Math.round(Math.max(0, Math.min(O.PH - h, cy - h / 2)))
+function viewNow(): View {
+  let x = 0, y = 0
   if (cutin) {
     const [sx, sy] = shakeOf(Date.now() - cutin.at)
     x += Math.round(sx)
     y += Math.round(sy)
   }
-  return { x, y, w, h }
+  return { x, y, w: O.PW, h: O.PH }
 }
 
 // ── 결정 컷인 ──
@@ -214,7 +126,7 @@ function sceneSig(o: Office): string {
 
 function paint(o: Office): boolean {
   const p0 = Date.now()
-  const view = viewNow(o)
+  const view = viewNow()
   if (cutin && Date.now() - cutin.at > CUTIN_MS) cutin = null
   const overlay = cutin ? cutinSvg(cutin.kind, Date.now() - cutin.at, view, deciderOf(o, cutin.by)) : ''
   const back = backLayerSvg(view)
@@ -269,9 +181,6 @@ export const register: Register = on => {
     todos = []
     spawned.clear()
     frame = { back: '', front: '', head: '', sig: '' }
-    focusPrev = null
-    zoom = null
-    zoomAmt = 0
     cutin = null
     office = createOffice({
       // 패널엔 집사가 없다: 팀장냥이 팀장실(예전 집사 자리)에 앉고, 집사에게 묻는 일도 자기 자리에서 한다
@@ -299,14 +208,13 @@ export const register: Register = on => {
       office.step(Math.min(0.5, (t - last) / 1000))
       last = t
       if (DEBUG_METER && meterTick()) void $.fs.write(`${$.plugin.root}/.meter.log`, meterLog.join('\n') + '\n').catch(() => {})
-      watchMoments(office)
       // 그림은 여기서 만들지 않는다: 앱이 그려 갈 때(render) 만든다(화면에 나간 장 기준으로 애니메이션을 이으려고).
       // 그리고 앱이 새 그림으로 바꿔 끼울 때마다 패널 전체가 잠깐 멈칫하므로, 꼭 필요할 때만 다시 그려 달라고 한다:
       //  · 장마다 0.8초 앞까지의 걷기·비행·다리 움직임이 들어 있으니, 그걸로 못 덮는 변화가 생겼을 때
       //  · 아무 변화가 없어도 미리 그린 0.8초가 끝나기 전에(0.65초마다)
-      //  · 컷인·확대처럼 코드로 한 장씩 계산하는 연출 중일 때
+      //  · 결정 컷인처럼 코드로 한 장씩 계산하는 연출 중일 때
       const sig = sceneSig(office)
-      const busyFx = !!cutin || !!zoom || zoomAmt > 0
+      const busyFx = !!cutin
       if (busyFx || sig !== lastSig || t - lastAsk >= REFRESH_MS) {
         lastSig = sig
         lastAsk = t
